@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.zip binary
+*.parquet binary
+*.pb binary
+
+mvnw text eol=lf
+*.sh text eol=lf
+*.cmd text eol=crlf
