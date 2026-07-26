@@ -1,0 +1,65 @@
+name: transit-delay-explorer
+
+# Redpanda instead of Kafka: single binary, no ZooKeeper/KRaft ceremony, same
+# wire protocol so the Java service uses the stock Kafka client unchanged.
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    container_name: tde-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      # INTERNAL is what containers use; EXTERNAL is what the host uses. Both
+      # have to be advertised or one side connects and then fails on metadata.
+      - --advertise-kafka-addr=INTERNAL://redpanda:9092,EXTERNAL://localhost:19092
+      - --rpc-addr=0.0.0.0:33145
+      - --advertise-rpc-addr=redpanda:33145
+      - --schema-registry-addr=0.0.0.0:8081
+    ports:
+      - "19092:19092"   # Kafka API (host)
+      - "18081:8081"    # Schema Registry
+      - "19644:9644"    # Admin API / metrics
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  console:
+    image: docker.redpanda.com/redpandadata/console:v2.7.2
+    container_name: tde-console
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://redpanda:8081
+    ports:
+      - "8090:8080"
+
+  # One-shot: creates topics with the partition counts the stream layer expects,
+  # then exits. Idempotent, so re-running compose up is safe.
+  topic-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    container_name: tde-topic-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/scripts/create-topics.sh"]
+    volumes:
+      - ./scripts:/scripts:ro
+    restart: "no"
+
+volumes:
+  redpanda-data:
