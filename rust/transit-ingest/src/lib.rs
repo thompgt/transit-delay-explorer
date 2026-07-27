@@ -5,12 +5,13 @@
 //! - [`config`] — the agency registry, so adding an agency is config not code
 //! - [`error`] — one error variant per failure mode, including per-file
 //!   referential integrity violations
+//! - [`gtfs`] — static feed row types and GTFS time handling
 //!
-//! Static parsing, timestamp resolution, Parquet output, and the realtime
-//! poller land in later phases.
+//! Parquet output and the realtime poller land in later phases.
 
 pub mod config;
 pub mod error;
+pub mod gtfs;
 
 pub use config::{Agency, Config};
 pub use error::{Error, Result};
