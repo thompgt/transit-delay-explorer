@@ -1,0 +1,96 @@
+# Agency registry. Adding an agency is a config entry, not a code change.
+#
+# Every field the ingest needs is here: where the static archive lives, which
+# realtime feeds to poll, the agency-local timezone used to resolve service
+# dates, and the quirks that agency's feed exhibits.
+
+[defaults]
+# Polling interval for realtime feeds. MTA regenerates roughly every 30s;
+# polling faster just burns requests for identical payloads.
+poll_interval_seconds = 30
+# A feed whose header timestamp is older than this is treated as stale and
+# raises a health event instead of silently producing old data.
+stale_after_seconds = 300
+request_timeout_seconds = 20
+# On-time threshold used by the default on-time-performance measure.
+on_time_threshold_seconds = 300
+
+# ---------------------------------------------------------------------------
+# NYC Subway
+# ---------------------------------------------------------------------------
+[[agency]]
+id = "MTA_NYCT"
+name = "MTA New York City Transit"
+mode = "subway"
+timezone = "America/New_York"
+static_url = "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip"
+
+# The subway feed is split across endpoints by trunk line. Each is an
+# independent GTFS-RT payload over the same static schedule.
+[[agency.realtime]]
+name = "ace"
+url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-ace"
+[[agency.realtime]]
+name = "bdfm"
+url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-bdfm"
+[[agency.realtime]]
+name = "g"
+url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-g"
+[[agency.realtime]]
+name = "jz"
+url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-jz"
+[[agency.realtime]]
+name = "nqrw"
+url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-nqrw"
+[[agency.realtime]]
+name = "l"
+url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-l"
+[[agency.realtime]]
+name = "numbered"
+url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs"
+[[agency.realtime]]
+name = "sir"
+url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-si"
+
+[agency.quirks]
+# NYCT realtime trip_ids carry a schedule-run prefix and do not match static
+# trip_ids literally; they must be matched on the suffix after the underscore.
+trip_id_match = "nyct_suffix"
+# NYCT stop_ids in realtime append a direction suffix (N/S) to the parent id.
+stop_id_direction_suffix = true
+
+# ---------------------------------------------------------------------------
+# Long Island Rail Road
+# ---------------------------------------------------------------------------
+[[agency]]
+id = "MTA_LIRR"
+name = "Long Island Rail Road"
+mode = "commuter_rail"
+timezone = "America/New_York"
+static_url = "https://rrgtfsfeeds.s3.amazonaws.com/gtfslirr.zip"
+
+[[agency.realtime]]
+name = "lirr"
+url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/lirr%2Fgtfs-lirr"
+
+[agency.quirks]
+trip_id_match = "exact"
+stop_id_direction_suffix = false
+
+# ---------------------------------------------------------------------------
+# Metro-North Railroad
+# ---------------------------------------------------------------------------
+[[agency]]
+id = "MTA_MNR"
+name = "Metro-North Railroad"
+mode = "commuter_rail"
+timezone = "America/New_York"
+static_url = "https://rrgtfsfeeds.s3.amazonaws.com/gtfsmnr.zip"
+
+[[agency.realtime]]
+name = "mnr"
+url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/mnr%2Fgtfs-mnr"
+
+[agency.quirks]
+trip_id_match = "exact"
+stop_id_direction_suffix = false
