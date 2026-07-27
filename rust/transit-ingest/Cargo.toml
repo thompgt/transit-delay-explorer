@@ -1,0 +1,37 @@
+[package]
+name = "transit-ingest"
+description = "GTFS static and realtime ingest for Transit Delay Explorer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "transit_ingest"
+path = "src/lib.rs"
+
+[[bin]]
+name = "transit-ingest"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+csv.workspace = true
+zip.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+arrow.workspace = true
+parquet.workspace = true
+reqwest.workspace = true
+indexmap.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
