@@ -1,0 +1,67 @@
+package dev.thompgt.transit.stream.domain;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import java.time.Instant;
+import java.time.LocalDate;
+
+/**
+ * One vehicle arrival at one stop — the unit the Rust ingest publishes and
+ * everything downstream aggregates over.
+ *
+ * <p>{@code routeKey} and {@code stopKey} are the namespaced surrogates
+ * ({@code MTA_LIRR:1}), not the raw GTFS ids. Route ids collide across the
+ * three MTA agencies, so aggregating on the bare id would silently merge three
+ * unrelated railroads into one line.
+ *
+ * <p>Nullable by design: {@code actualArrival} and {@code delaySeconds} are
+ * absent for a cancelled trip, and {@code headwaySeconds} is absent for the
+ * first vehicle of the day on a route/stop/direction.
+ *
+ * @param eventId        hash of agency + trip + stop + service date
+ * @param serviceDate    agency-local service date, the Parquet partition key
+ * @param agencyId       owning agency
+ * @param routeKey       {@code {agencyId}:{routeId}}
+ * @param routeId        raw GTFS route id, for display
+ * @param tripId         raw GTFS trip id
+ * @param stopKey        {@code {agencyId}:{stopId}}
+ * @param stopId         raw GTFS stop id
+ * @param stopSequence   position along the trip
+ * @param directionId    0 or 1
+ * @param scheduledArrival resolved from GTFS, midnight-rollover aware
+ * @param actualArrival  null when the trip was cancelled
+ * @param delaySeconds   negative means early; null when cancelled
+ * @param dwellSeconds   departure minus arrival
+ * @param headwaySeconds gap since the previous vehicle on this route/stop/direction
+ * @param cancelled      whether the realtime feed cancelled this trip
+ * @param vehicleId      nullable — not every feed reports one
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+public record StopEvent(
+        String eventId,
+        LocalDate serviceDate,
+        String agencyId,
+        String routeKey,
+        String routeId,
+        String tripId,
+        String stopKey,
+        String stopId,
+        int stopSequence,
+        int directionId,
+        Instant scheduledArrival,
+        Instant actualArrival,
+        Integer delaySeconds,
+        Integer dwellSeconds,
+        Integer headwaySeconds,
+        boolean cancelled,
+        String vehicleId) {
+
+    /**
+     * Whether this event carries a usable delay measurement. Cancelled trips
+     * and events still awaiting an actual arrival must not be folded into
+     * delay aggregates — counting a cancellation as zero delay is the single
+     * easiest way to make a struggling route look punctual.
+     */
+    public boolean hasDelayMeasurement() {
+        return !cancelled && delaySeconds != null;
+    }
+}

@@ -1,0 +1,66 @@
+spring:
+  application:
+    name: transit-stream
+
+  # Virtual threads for connection handling. The SSE endpoint holds one thread
+  # per subscriber for the life of the subscription, which is exactly the
+  # workload platform threads handle badly.
+  threads:
+    virtual:
+      enabled: true
+
+  kafka:
+    bootstrap-servers: ${TDE_KAFKA_BOOTSTRAP:localhost:19092}
+    consumer:
+      group-id: transit-stream
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        # Aggregates are rebuilt from the window on restart, so a slow consumer
+        # should be rebalanced out rather than stall the group.
+        max.poll.records: 500
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+server:
+  port: ${TDE_STREAM_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+tde:
+  topics:
+    stop-events: transit.stop_events
+    alerts: transit.alerts
+    ingest-health: transit.ingest_health
+  # Rolling aggregate windows, keyed by route and by stop.
+  windows:
+    - 5m
+    - 1h
+    - 24h
+  # An on-time arrival is within this many seconds of schedule. Configurable
+  # because agencies define it differently -- commuter rail is far stricter
+  # than subway.
+  on-time-threshold-seconds: 300
+  anomaly:
+    # A route is anomalous when its current window mean delay exceeds the
+    # historical baseline for the same day-of-week and hour by this much.
+    threshold-seconds: 120
+    # Below this many observations the window is too thin to judge.
+    min-observations: 20
+  parquet:
+    # Shared volume the cube reads. Compaction flushes completed windows here.
+    output-dir: ${TDE_PARQUET_DIR:/data/parquet}
+    flush-cron: "0 */5 * * * *"
+
+logging:
+  level:
+    dev.thompgt.transit: INFO
