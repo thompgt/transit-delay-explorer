@@ -33,3 +33,12 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
+# Explicit rule set rather than the default, so a new ruff release does not
+# turn CI red without a code change.
+#
+# DTZ (naive datetime) is deliberately excluded: service_date_for takes an
+# agency-local wall-clock time. Attaching a tzinfo would be wrong, not safer --
+# the whole point is that a service date is a local calendar concept.
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]

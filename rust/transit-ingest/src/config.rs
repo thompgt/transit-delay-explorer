@@ -39,10 +39,18 @@ pub struct Defaults {
     pub on_time_threshold_seconds: i64,
 }
 
-fn d_poll() -> u64 { 30 }
-fn d_stale() -> u64 { 300 }
-fn d_timeout() -> u64 { 20 }
-fn d_on_time() -> i64 { 300 }
+fn d_poll() -> u64 {
+    30
+}
+fn d_stale() -> u64 {
+    300
+}
+fn d_timeout() -> u64 {
+    20
+}
+fn d_on_time() -> i64 {
+    300
+}
 
 impl Default for Defaults {
     fn default() -> Self {
@@ -219,15 +227,15 @@ mod tests {
     #[test]
     fn keys_are_namespaced_per_agency() {
         let config = repo_config();
-        let keys: Vec<_> = config
-            .agencies
-            .iter()
-            .map(|a| a.route_key("1"))
-            .collect();
+        let keys: Vec<_> = config.agencies.iter().map(|a| a.route_key("1")).collect();
         assert_eq!(keys, ["MTA_NYCT:1", "MTA_LIRR:1", "MTA_MNR:1"]);
 
         let unique: std::collections::HashSet<_> = keys.iter().collect();
-        assert_eq!(unique.len(), 3, "route keys must not collide across agencies");
+        assert_eq!(
+            unique.len(),
+            3,
+            "route keys must not collide across agencies"
+        );
     }
 
     #[test]
