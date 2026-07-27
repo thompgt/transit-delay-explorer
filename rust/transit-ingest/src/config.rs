@@ -5,7 +5,7 @@
 //! timezone used to resolve service dates, and the per-agency quirks that the
 //! parsers key off.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono_tz::Tz;
 use serde::Deserialize;
@@ -127,6 +127,13 @@ impl Agency {
     /// across the three MTA feeds.
     pub fn stop_key(&self, stop_id: &str) -> String {
         format!("{}:{}", self.id, stop_id)
+    }
+
+    /// Where this agency's downloaded static archive lives under `data_dir`.
+    /// Named after the agency id rather than the URL's filename, so two
+    /// agencies that both publish `gtfs.zip` do not overwrite each other.
+    pub fn archive_path(&self, data_dir: &Path) -> PathBuf {
+        data_dir.join("raw").join(format!("{}.zip", self.id))
     }
 
     /// Parsed timezone. Validated at load so a typo fails at startup rather
