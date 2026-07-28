@@ -10,24 +10,28 @@
 //! a null column costs almost nothing — Parquet stores it as a definition-level
 //! run — and buys a Phase 5 that swaps the data without touching the cube.
 //!
-//! Two type choices worth stating. `service_date` is `Date32`, not a string,
-//! because it is the partition key and a string partition sorts lexically —
-//! which happens to be right for ISO dates and wrong for everything a reader
-//! might do with it afterwards. Timestamps are microsecond-precision and
-//! explicitly UTC-tagged: GTFS resolution already accounts for the agency
-//! timezone, and a naive timestamp would invite a second, wrong conversion
-//! downstream.
+//! `service_date` is deliberately *not* a column here. It is the partition key,
+//! and it lives in the directory name — `service_date=2026-05-26/` — which is
+//! where a Hive-partitioned dataset is supposed to keep it. Writing it in both
+//! places is not harmless redundancy: pyarrow, Spark and every other
+//! partition-aware reader fails outright on the dataset with
+//! `Field service_date has incompatible types: date32[day] vs string`, because
+//! the path supplies a string and the file supplies a date. Readers get it back
+//! as a real date by declaring the partition schema, which
+//! `transit_cube.dataset` does.
+//!
+//! Timestamps are microsecond-precision and explicitly UTC-tagged: GTFS
+//! resolution already accounts for the agency timezone, and a naive timestamp
+//! would invite a second, wrong conversion downstream.
 
 use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
 use arrow::array::{
-    ArrayRef, BooleanArray, Date32Array, Int32Array, RecordBatch, StringArray,
-    TimestampMicrosecondArray,
+    ArrayRef, BooleanArray, Int32Array, RecordBatch, StringArray, TimestampMicrosecondArray,
 };
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
-use chrono::NaiveDate;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties;
@@ -44,7 +48,8 @@ pub fn schema() -> SchemaRef {
 
     Arc::new(Schema::new(vec![
         Field::new("event_id", DataType::Utf8, false),
-        Field::new("service_date", DataType::Date32, false),
+        // service_date is absent by design — it is the partition key, supplied
+        // by the directory name. See the module docs.
         Field::new("agency_id", DataType::Utf8, false),
         Field::new("route_id", DataType::Utf8, false),
         Field::new("route_key", DataType::Utf8, false),
@@ -81,9 +86,6 @@ pub fn to_record_batch(events: &[ScheduledEvent]) -> Result<RecordBatch> {
     let columns: Vec<ArrayRef> = vec![
         Arc::new(StringArray::from_iter_values(
             events.iter().map(|e| e.event_id.as_str()),
-        )),
-        Arc::new(Date32Array::from_iter_values(
-            events.iter().map(|e| days_since_epoch(e.service_date)),
         )),
         Arc::new(StringArray::from_iter_values(
             events.iter().map(|e| e.agency_id.as_str()),
@@ -125,11 +127,14 @@ pub fn to_record_batch(events: &[ScheduledEvent]) -> Result<RecordBatch> {
         Arc::new(BooleanArray::from_iter(
             events.iter().map(|e| Some(e.crosses_midnight)),
         )),
-        arrow::array::new_null_array(schema.field(14).data_type(), rows),
-        arrow::array::new_null_array(schema.field(15).data_type(), rows),
-        arrow::array::new_null_array(schema.field(16).data_type(), rows),
-        arrow::array::new_null_array(schema.field(17).data_type(), rows),
-        arrow::array::new_null_array(schema.field(18).data_type(), rows),
+        // By name rather than by position: these are the columns most likely to
+        // move when the schema changes, and a positional slip here would write
+        // nulls of the wrong type without any complaint from the compiler.
+        nulls(&schema, "actual_arrival", rows),
+        nulls(&schema, "delay_seconds", rows),
+        nulls(&schema, "headway_seconds", rows),
+        nulls(&schema, "is_cancelled", rows),
+        nulls(&schema, "vehicle_id", rows),
     ];
 
     RecordBatch::try_new(schema, columns).map_err(Error::from)
@@ -181,16 +186,18 @@ fn parquet_error(path: &Path, source: parquet::errors::ParquetError) -> Error {
     }
 }
 
-/// Arrow's `Date32` is days since the Unix epoch.
-fn days_since_epoch(date: NaiveDate) -> i32 {
-    (date - NaiveDate::from_ymd_opt(1970, 1, 1).expect("the epoch is a valid date")).num_days()
-        as i32
+/// An all-null column of the schema's declared type for `name`.
+fn nulls(schema: &SchemaRef, name: &str, rows: usize) -> ArrayRef {
+    let field = schema
+        .field_with_name(name)
+        .expect("schema() and to_record_batch() must name the same columns");
+    arrow::array::new_null_array(field.data_type(), rows)
 }
 
 #[cfg(test)]
 mod tests {
     use arrow::array::Array;
-    use chrono::{DateTime, Utc};
+    use chrono::{DateTime, NaiveDate, Utc};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
     use super::*;
@@ -256,7 +263,6 @@ mod tests {
             names,
             [
                 "event_id",
-                "service_date",
                 "agency_id",
                 "route_id",
                 "route_key",
@@ -341,26 +347,16 @@ mod tests {
     }
 
     #[test]
-    fn service_date_is_a_date_not_a_string() {
+    fn service_date_is_not_a_column() {
+        // It is the partition key and lives in the directory name. Writing it
+        // in both places makes every partition-aware reader fail on the whole
+        // dataset with a date32-versus-string type conflict.
         let batch = round_trip(&[event(1)]);
-        let index = batch.schema().index_of("service_date").unwrap();
 
-        assert_eq!(batch.schema().field(index).data_type(), &DataType::Date32);
-
-        let dates = batch
-            .column(index)
-            .as_any()
-            .downcast_ref::<Date32Array>()
-            .unwrap();
-        // 2026-04-01, counted in days from the epoch.
-        assert_eq!(dates.value(0), days_since_epoch(date(2026, 4, 1)));
-    }
-
-    #[test]
-    fn the_epoch_and_dates_before_it_encode_correctly() {
-        assert_eq!(days_since_epoch(date(1970, 1, 1)), 0);
-        assert_eq!(days_since_epoch(date(1970, 1, 2)), 1);
-        assert_eq!(days_since_epoch(date(1969, 12, 31)), -1);
+        assert!(
+            batch.schema().index_of("service_date").is_err(),
+            "service_date must come from the partition path, not the file"
+        );
     }
 
     #[test]

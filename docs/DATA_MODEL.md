@@ -6,8 +6,8 @@ One row per vehicle arrival at a stop. Partitioned by `service_date`.
 
 | Column | Type | Notes |
 | --- | --- | --- |
-| `event_id` | string | Hash of agency + trip + stop + service date |
-| `service_date` | date | Partition key |
+| `event_id` | string | Hash of agency + trip + `stop_sequence` + service date |
+| `service_date` | date | **Partition key — in the path, not in the file** |
 | `agency_id` | string | Part of every FK — see composite keys below |
 | `route_id` | string | FK to `routes`, only unique within agency |
 | `route_key` | string | `{agency_id}:{route_id}` — the actual join key |
@@ -26,7 +26,28 @@ One row per vehicle arrival at a stop. Partitioned by `service_date`.
 
 `scheduled_events` is the same shape restricted to the static feed: every
 column that requires realtime data is null. Phase 1 emits it; Phase 3 upgrades
-it into `stop_events`.
+it into `stop_events`. The realtime columns are written as typed nulls rather
+than omitted, so the cube built on `scheduled_events` in Phase 2 needs no
+schema rework when Phase 5 swaps in the real facts.
+
+### Partitioning
+
+The layout is Hive-style, one file per agency per date:
+
+```
+data/parquet/scheduled_events/service_date=2026-05-26/MTA_NYCT.parquet
+```
+
+`service_date` appears in the **path only**. Writing it in both the path and
+the file is not harmless redundancy — the path supplies a string and the file a
+`date32`, and every partition-aware reader then fails on the whole dataset with
+`Field service_date has incompatible types: date32[day] vs string`. Readers get
+it back as a real date by declaring the partition schema, which
+`transit_cube.dataset` does.
+
+One file per agency rather than one merged file, because the three feeds are
+downloaded and re-ingested independently: rebuilding the Subway must not rewrite
+a file that also holds LIRR rows.
 
 ## Composite keys
 
