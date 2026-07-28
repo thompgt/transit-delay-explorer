@@ -2,13 +2,15 @@
 
 use std::path::PathBuf;
 
+use chrono::NaiveDate;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use transit_ingest::{
-    config::Config,
+    config::{Agency, Config},
+    dataset,
     error::ConfigError,
-    gtfs::{validate, GtfsTime, StaticFeed},
+    gtfs::{validate, GtfsTime, ServiceCalendar, StaticFeed},
 };
 
 #[derive(Parser)]
@@ -47,6 +49,29 @@ enum Command {
         /// Archive to read. Defaults to `<data-dir>/raw/<agency>.zip`.
         #[arg(long)]
         archive: Option<PathBuf>,
+    },
+
+    /// Resolve a static archive into a partitioned Parquet dataset.
+    Build {
+        /// Agency id from the registry. Omit to build every configured agency.
+        agency: Option<String>,
+        /// Archive to read. Defaults to `<data-dir>/raw/<agency>.zip`.
+        #[arg(long)]
+        archive: Option<PathBuf>,
+        /// First service date to write, `YYYY-MM-DD`. Defaults to the start of
+        /// the feed's own coverage.
+        #[arg(long)]
+        from: Option<NaiveDate>,
+        /// Last service date to write, inclusive.
+        #[arg(long)]
+        to: Option<NaiveDate>,
+        /// Write only the first N days from `--from`. A convenience for the
+        /// common case of wanting one service week rather than a whole feed.
+        #[arg(long, conflicts_with = "to")]
+        days: Option<u32>,
+        /// Write the dataset even if the feed has integrity violations.
+        #[arg(long)]
+        allow_violations: bool,
     },
 }
 
@@ -125,7 +150,125 @@ fn main() -> anyhow::Result<()> {
                 std::process::exit(1);
             }
         }
+
+        Command::Build {
+            agency,
+            archive,
+            from,
+            to,
+            days,
+            allow_violations,
+        } => {
+            let agencies: Vec<&Agency> = match &agency {
+                Some(id) => vec![config
+                    .agency(id)
+                    .ok_or(ConfigError::UnknownAgency { agency: id.clone() })?],
+                None => {
+                    if archive.is_some() {
+                        anyhow::bail!("--archive names one file, so it needs one agency");
+                    }
+                    config.agencies.iter().collect()
+                }
+            };
+
+            for agency in agencies {
+                let path = archive
+                    .clone()
+                    .unwrap_or_else(|| agency.archive_path(&cli.data_dir));
+                let feed = StaticFeed::read(&path, agency)?;
+
+                // A dataset built from a feed with dangling keys produces a
+                // cube with silently missing slices, which is worse than no
+                // cube. Overridable, because sometimes you want to look at it
+                // anyway.
+                let violations = validate::check(&feed);
+                if !violations.is_empty() {
+                    println!("{}: {} violation(s)", agency.id, violations.len());
+                    for violation in &violations {
+                        println!("  {violation}");
+                    }
+                    if !allow_violations {
+                        anyhow::bail!(
+                            "{} failed validation; pass --allow-violations to build anyway",
+                            agency.id
+                        );
+                    }
+                }
+
+                let range = date_range(&feed, from, to, days)?;
+                let summary = dataset::build(&feed, agency, &cli.data_dir, range)?;
+                print_summary(&summary);
+            }
+        }
     }
 
     Ok(())
+}
+
+/// Resolve the requested window against what the feed actually covers.
+///
+/// `--days` counts service dates from the start of the window rather than
+/// calendar days, so "one week" means seven days that have service on them.
+/// On a feed with weekday-only service those are not the same span, and the
+/// useful reading is the one that yields seven partitions.
+fn date_range(
+    feed: &StaticFeed,
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    days: Option<u32>,
+) -> anyhow::Result<Option<(NaiveDate, NaiveDate)>> {
+    if from.is_none() && to.is_none() && days.is_none() {
+        return Ok(None);
+    }
+
+    let calendar = ServiceCalendar::build(feed)?;
+    let Some((first, last)) = calendar.coverage() else {
+        anyhow::bail!("feed has no service dates at all");
+    };
+
+    let start = from.unwrap_or(first);
+
+    let end = match (to, days) {
+        (Some(to), _) => to,
+        (None, Some(days)) if days > 0 => calendar
+            .active_dates()
+            .into_iter()
+            .filter(|d| *d >= start)
+            .nth(days as usize - 1)
+            // Fewer service dates remain than were asked for; take what there
+            // is rather than failing on a window that is merely optimistic.
+            .unwrap_or(last),
+        (None, Some(_)) => anyhow::bail!("--days must be at least 1"),
+        (None, None) => last,
+    };
+
+    if end < start {
+        anyhow::bail!("--to {end} is before --from {start}");
+    }
+
+    Ok(Some((start, end)))
+}
+
+fn print_summary(summary: &dataset::Summary) {
+    let span = match (summary.first_date, summary.last_date) {
+        (Some(first), Some(last)) => format!("{first} .. {last}"),
+        _ => "no dates in range".to_string(),
+    };
+
+    println!("{} — {}", summary.agency_id, span);
+    println!("  partitions      {:>9}", summary.dates_written);
+    println!("  events          {:>9}", summary.events);
+    println!("  trips resolved  {:>9}", summary.trips);
+    println!("  routes          {:>9}", summary.routes);
+    println!("  stops           {:>9}", summary.stops);
+    println!("  past 24:00:00   {:>9}", summary.crossing_midnight);
+
+    // Only worth printing when non-zero: these are the two counts that explain
+    // a row total coming in lower than expected.
+    if summary.untimed_stop_times > 0 {
+        println!("  untimed, dropped{:>9}", summary.untimed_stop_times);
+    }
+    if summary.dates_empty > 0 {
+        println!("  empty dates     {:>9}", summary.dates_empty);
+    }
 }

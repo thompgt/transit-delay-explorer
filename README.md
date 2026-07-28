@@ -65,12 +65,45 @@ cd python/transit-cube && pip install -e ".[dev]" && pytest
 Adding an agency is an entry there — feed URLs, timezone, and the per-agency
 quirks — not a code change.
 
+## Ingesting
+
+`transit-ingest` reads static GTFS archives from `data/raw/<agency>.zip` and
+writes a partitioned Parquet dataset under `data/parquet/`.
+
+```bash
+cd rust
+cargo run --bin transit-ingest -- agencies                # list the registry
+cargo run --bin transit-ingest -- inspect MTA_NYCT        # contents + integrity
+cargo run --release --bin transit-ingest -- build --days 7   # all three agencies
+```
+
+`build` takes an optional agency id, `--from` / `--to` for an explicit window,
+or `--days N` for the first N *service* dates from the start of coverage — on a
+weekday-only feed that is not the same as N calendar days, and seven partitions
+is the useful reading. It refuses to write a feed with referential integrity
+violations unless given `--allow-violations`, since a dataset with dangling
+keys becomes a cube with silently missing slices.
+
+The output layout is Hive-style, so Arrow, pandas and Atoti all prune on the
+partition key rather than scanning the table:
+
+```
+data/parquet/
+  scheduled_events/service_date=2026-05-26/MTA_NYCT.parquet
+  routes/MTA_NYCT.parquet
+  stops/MTA_NYCT.parquet
+```
+
+One file per agency per date: the three feeds are re-ingested independently, so
+rebuilding the Subway must not rewrite a file that also holds LIRR rows.
+
 ## Status
 
 Built in phases; see [`docs/WORKPLAN.md`](docs/WORKPLAN.md).
 
 - [x] Phase 0 — Foundations: monorepo, broker, topics, verified round trip
-- [ ] Phase 1 — Rust static ingest — *in progress: config + error model done*
+- [ ] Phase 1 — Rust static ingest — *in progress: parse, validate, resolve and
+  write Parquet all land; feed download is the remaining piece*
 - [ ] Phase 2 — Atoti cube v1 (static data)
 - [ ] Phase 3 — Rust realtime ingest
 - [ ] Phase 4 — Java streaming service
