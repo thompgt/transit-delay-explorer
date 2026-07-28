@@ -10,6 +10,7 @@ use transit_ingest::{
     config::{Agency, Config},
     dataset,
     error::ConfigError,
+    fetch,
     gtfs::{validate, GtfsTime, ServiceCalendar, StaticFeed},
 };
 
@@ -41,6 +42,15 @@ struct Cli {
 enum Command {
     /// List configured agencies and their feeds.
     Agencies,
+
+    /// Download static GTFS archives into `<data-dir>/raw/`.
+    Fetch {
+        /// Agency id from the registry. Omit to fetch every configured agency.
+        agency: Option<String>,
+        /// Re-download even when an archive is already present.
+        #[arg(long)]
+        force: bool,
+    },
 
     /// Parse a static archive and report its contents and integrity.
     Inspect {
@@ -97,6 +107,25 @@ fn main() -> anyhow::Result<()> {
                 println!(
                     "{:<10} {:<28} {:<14} tz={} realtime=[{}]",
                     agency.id, agency.name, agency.mode, agency.timezone, feeds
+                );
+            }
+        }
+
+        Command::Fetch { agency, force } => {
+            let timeout = std::time::Duration::from_secs(config.defaults.request_timeout_seconds);
+
+            for agency in select(&config, agency.as_deref())? {
+                let fetched = fetch::static_archive(agency, &cli.data_dir, timeout, force)?;
+                println!(
+                    "{:<10} {:>7.1} MB  {}{}",
+                    fetched.agency_id,
+                    fetched.bytes as f64 / (1024.0 * 1024.0),
+                    fetched.path.display(),
+                    if fetched.reused {
+                        "  (already present; --force to re-download)"
+                    } else {
+                        ""
+                    }
                 );
             }
         }
@@ -159,19 +188,11 @@ fn main() -> anyhow::Result<()> {
             days,
             allow_violations,
         } => {
-            let agencies: Vec<&Agency> = match &agency {
-                Some(id) => vec![config
-                    .agency(id)
-                    .ok_or(ConfigError::UnknownAgency { agency: id.clone() })?],
-                None => {
-                    if archive.is_some() {
-                        anyhow::bail!("--archive names one file, so it needs one agency");
-                    }
-                    config.agencies.iter().collect()
-                }
-            };
+            if agency.is_none() && archive.is_some() {
+                anyhow::bail!("--archive names one file, so it needs one agency");
+            }
 
-            for agency in agencies {
+            for agency in select(&config, agency.as_deref())? {
                 let path = archive
                     .clone()
                     .unwrap_or_else(|| agency.archive_path(&cli.data_dir));
@@ -203,6 +224,19 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// One named agency, or all of them. Commands that operate per-agency all
+/// accept the id as optional and default to the whole registry.
+fn select<'a>(config: &'a Config, agency: Option<&str>) -> anyhow::Result<Vec<&'a Agency>> {
+    match agency {
+        Some(id) => Ok(vec![config.agency(id).ok_or(
+            ConfigError::UnknownAgency {
+                agency: id.to_string(),
+            },
+        )?]),
+        None => Ok(config.agencies.iter().collect()),
+    }
 }
 
 /// Resolve the requested window against what the feed actually covers.

@@ -67,15 +67,25 @@ quirks — not a code change.
 
 ## Ingesting
 
-`transit-ingest` reads static GTFS archives from `data/raw/<agency>.zip` and
-writes a partitioned Parquet dataset under `data/parquet/`.
+`transit-ingest` downloads static GTFS archives to `data/raw/<agency>.zip` and
+writes a partitioned Parquet dataset under `data/parquet/`. From nothing to a
+service week of all three agencies is two commands:
 
 ```bash
 cd rust
-cargo run --bin transit-ingest -- agencies                # list the registry
-cargo run --bin transit-ingest -- inspect MTA_NYCT        # contents + integrity
-cargo run --release --bin transit-ingest -- build --days 7   # all three agencies
+cargo run --release --bin transit-ingest -- fetch            # download archives
+cargo run --release --bin transit-ingest -- build --days 7   # write the dataset
+
+cargo run --bin transit-ingest -- agencies                   # list the registry
+cargo run --bin transit-ingest -- inspect MTA_NYCT           # contents + integrity
 ```
+
+`fetch` keeps an archive it already has — the static feeds change a few times a
+year — so pass `--force` to re-download. A download is validated as a zip
+holding the required GTFS files before it replaces anything on disk: the MTA
+serves an HTML error page with a 200 status when a feed is briefly down, and
+letting that land as `MTA_NYCT.zip` turns a network blip into a parse error
+days later that names entirely the wrong cause.
 
 `build` takes an optional agency id, `--from` / `--to` for an explicit window,
 or `--days N` for the first N *service* dates from the start of coverage — on a
@@ -102,8 +112,8 @@ rebuilding the Subway must not rewrite a file that also holds LIRR rows.
 Built in phases; see [`docs/WORKPLAN.md`](docs/WORKPLAN.md).
 
 - [x] Phase 0 — Foundations: monorepo, broker, topics, verified round trip
-- [ ] Phase 1 — Rust static ingest — *in progress: parse, validate, resolve and
-  write Parquet all land; feed download is the remaining piece*
+- [x] Phase 1 — Rust static ingest: fetch, parse, validate, resolve, and write a
+  partitioned Parquet dataset for a service week
 - [ ] Phase 2 — Atoti cube v1 (static data)
 - [ ] Phase 3 — Rust realtime ingest
 - [ ] Phase 4 — Java streaming service

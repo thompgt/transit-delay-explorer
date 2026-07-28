@@ -8,12 +8,14 @@
 //! - [`gtfs`] — static feed row types and GTFS time handling
 //! - [`schedule`] — the join from feed to scheduled stop events, per service date
 //! - [`dataset`] — Parquet output, the handoff to the cube and the Java service
+//! - [`fetch`] — downloading static archives, validated before they land
 //!
 //! The realtime poller lands in a later phase.
 
 pub mod config;
 pub mod dataset;
 pub mod error;
+pub mod fetch;
 pub mod gtfs;
 pub mod schedule;
 
