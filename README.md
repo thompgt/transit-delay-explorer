@@ -88,11 +88,19 @@ letting that land as `MTA_NYCT.zip` turns a network blip into a parse error
 days later that names entirely the wrong cause.
 
 `build` takes an optional agency id, `--from` / `--to` for an explicit window,
-or `--days N` for the first N *service* dates from the start of coverage — on a
-weekday-only feed that is not the same as N calendar days, and seven partitions
-is the useful reading. It refuses to write a feed with referential integrity
-violations unless given `--allow-violations`, since a dataset with dangling
-keys becomes a cube with silently missing slices.
+or `--days N` for N days from the start of the window.
+
+The default window is the **intersection** of what the selected agencies cover,
+not the union. The three MTA feeds are published on their own schedules and
+their coverage barely overlaps — taking each feed's own first week gives the
+Subway late May, Metro-North mid-July and the LIRR the end of July, with not one
+day in common. Every cross-agency question the cube exists to answer is
+unanswerable on a dataset like that, and nothing looks wrong until you slice by
+agency and one of them is empty. `inspect` prints a feed's coverage.
+
+`build` refuses to write a feed with referential integrity violations unless
+given `--allow-violations`, since a dataset with dangling keys becomes a cube
+with silently missing slices.
 
 The output layout is Hive-style, so Arrow, pandas and Atoti all prune on the
 partition key rather than scanning the table:

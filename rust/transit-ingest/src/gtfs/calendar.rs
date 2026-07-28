@@ -19,12 +19,14 @@
 //! is the more specific statement and that is how producers use it.
 
 use std::collections::{BTreeSet, HashMap};
+use std::path::Path;
 
 use chrono::{Datelike, NaiveDate};
 use tracing::warn;
 
 use crate::error::{FeedError, Result};
-use crate::gtfs::archive::StaticFeed;
+use crate::gtfs::archive::{Archive, StaticFeed};
+use crate::gtfs::records::{CalendarDateRow, CalendarRow};
 use crate::gtfs::time::parse_date;
 
 /// An implausible `end_date` is a garbled field, not a century of service.
@@ -46,9 +48,27 @@ impl ServiceCalendar {
     /// state of a feed near the end of its validity window, and distinguishing
     /// it from "no such service" is what makes the warning below possible.
     pub fn build(feed: &StaticFeed) -> Result<Self> {
+        Self::from_rows(&feed.calendar, &feed.calendar_dates)
+    }
+
+    /// Read *only* the calendar files from an archive.
+    ///
+    /// Coverage is needed before deciding which dates to build, and parsing a
+    /// whole feed to answer "what days does this cover" means holding half a
+    /// million stop_times to read two small files. Three agencies at once makes
+    /// that the difference between a cheap question and a memory problem.
+    pub fn read(path: &Path) -> Result<Self> {
+        let mut archive = Archive::open(path)?;
+        let calendar: Vec<CalendarRow> = archive.read_optional("calendar.txt")?;
+        let calendar_dates: Vec<CalendarDateRow> = archive.read_optional("calendar_dates.txt")?;
+
+        Self::from_rows(&calendar, &calendar_dates)
+    }
+
+    fn from_rows(calendar: &[CalendarRow], calendar_dates: &[CalendarDateRow]) -> Result<Self> {
         let mut dates: HashMap<String, BTreeSet<NaiveDate>> = HashMap::new();
 
-        for row in &feed.calendar {
+        for row in calendar {
             let start = parse_date(&row.start_date, "calendar.txt")?;
             let end = parse_date(&row.end_date, "calendar.txt")?;
 
@@ -84,7 +104,7 @@ impl ServiceCalendar {
 
         // Two passes so an addition and a removal on the same date resolve to
         // "does not run" regardless of the order the rows appear in the file.
-        for row in &feed.calendar_dates {
+        for row in calendar_dates {
             if row.adds_service() {
                 let date = parse_date(&row.date, "calendar_dates.txt")?;
                 dates
@@ -94,7 +114,7 @@ impl ServiceCalendar {
             }
         }
 
-        for row in &feed.calendar_dates {
+        for row in calendar_dates {
             match row.exception_type {
                 1 => {}
                 2 => {

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use chrono::NaiveDate;
+use chrono::{Duration, NaiveDate};
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
@@ -75,8 +75,9 @@ enum Command {
         /// Last service date to write, inclusive.
         #[arg(long)]
         to: Option<NaiveDate>,
-        /// Write only the first N days from `--from`. A convenience for the
-        /// common case of wanting one service week rather than a whole feed.
+        /// Write N calendar days from the start of the window. Defaults the
+        /// window to the dates every selected agency covers, so the result is
+        /// comparable across them.
         #[arg(long, conflicts_with = "to")]
         days: Option<u32>,
         /// Write the dataset even if the feed has integrity violations.
@@ -146,6 +147,19 @@ fn main() -> anyhow::Result<()> {
             println!("  calendar        {:>9}", feed.calendar.len());
             println!("  calendar_dates  {:>9}", feed.calendar_dates.len());
 
+            // The feed's real coverage, which is what a build window has to sit
+            // inside — and not what feed_info.txt claims, that field being
+            // optional and frequently stale.
+            let calendar = ServiceCalendar::build(&feed)?;
+            match calendar.coverage() {
+                Some((first, last)) => {
+                    println!("  services        {:>9}", calendar.service_count());
+                    println!("  service dates   {:>9}", calendar.active_dates().len());
+                    println!("  coverage         {first} .. {last}");
+                }
+                None => println!("  coverage             none — no service on any date"),
+            }
+
             let rollovers = feed
                 .stop_times
                 .iter()
@@ -192,10 +206,20 @@ fn main() -> anyhow::Result<()> {
                 anyhow::bail!("--archive names one file, so it needs one agency");
             }
 
-            for agency in select(&config, agency.as_deref())? {
-                let path = archive
+            let agencies = select(&config, agency.as_deref())?;
+            let archive_of = |agency: &Agency| {
+                archive
                     .clone()
-                    .unwrap_or_else(|| agency.archive_path(&cli.data_dir));
+                    .unwrap_or_else(|| agency.archive_path(&cli.data_dir))
+            };
+
+            let window = resolve_window(&agencies, &archive_of, from, to, days)?;
+            if let Some((start, end)) = window {
+                println!("building {start} .. {end}\n");
+            }
+
+            for agency in agencies {
+                let path = archive_of(agency);
                 let feed = StaticFeed::read(&path, agency)?;
 
                 // A dataset built from a feed with dangling keys produces a
@@ -216,8 +240,7 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
 
-                let range = date_range(&feed, from, to, days)?;
-                let summary = dataset::build(&feed, agency, &cli.data_dir, range)?;
+                let summary = dataset::build(&feed, agency, &cli.data_dir, window)?;
                 print_summary(&summary);
             }
         }
@@ -239,14 +262,20 @@ fn select<'a>(config: &'a Config, agency: Option<&str>) -> anyhow::Result<Vec<&'
     }
 }
 
-/// Resolve the requested window against what the feed actually covers.
+/// Resolve one date window that every agency being built actually covers.
 ///
-/// `--days` counts service dates from the start of the window rather than
-/// calendar days, so "one week" means seven days that have service on them.
-/// On a feed with weekday-only service those are not the same span, and the
-/// useful reading is the one that yields seven partitions.
-fn date_range(
-    feed: &StaticFeed,
+/// The three MTA feeds are published on their own schedules and their coverage
+/// barely overlaps — taking each feed's own first week gave the Subway late
+/// May, Metro-North mid-July and the LIRR the end of July, with not one day in
+/// common. Every cross-agency question the cube exists to answer is
+/// unanswerable on a dataset like that, and nothing about it looks wrong until
+/// you slice by agency and one of them is empty.
+///
+/// So the default window is the intersection of coverage, not the union.
+/// `--from` and `--to` override it when a specific window is wanted.
+fn resolve_window(
+    agencies: &[&Agency],
+    archive_of: &dyn Fn(&Agency) -> PathBuf,
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
     days: Option<u32>,
@@ -254,30 +283,56 @@ fn date_range(
     if from.is_none() && to.is_none() && days.is_none() {
         return Ok(None);
     }
+    if days == Some(0) {
+        anyhow::bail!("--days must be at least 1");
+    }
 
-    let calendar = ServiceCalendar::build(feed)?;
-    let Some((first, last)) = calendar.coverage() else {
-        anyhow::bail!("feed has no service dates at all");
-    };
+    // Fully specified: no need to open anything.
+    if let (Some(start), Some(end)) = (from, to) {
+        if end < start {
+            anyhow::bail!("--to {end} is before --from {start}");
+        }
+        return Ok(Some((start, end)));
+    }
 
-    let start = from.unwrap_or(first);
+    // Only the calendar files are read, so this stays cheap even though it
+    // touches every archive before the first one is built.
+    let mut shared: Option<(NaiveDate, NaiveDate)> = None;
+    for agency in agencies {
+        let path = archive_of(agency);
+        let calendar = ServiceCalendar::read(&path)?;
+        let Some((first, last)) = calendar.coverage() else {
+            anyhow::bail!("{} has no service dates at all", agency.id);
+        };
 
+        println!("{:<10} covers {first} .. {last}", agency.id);
+        shared = Some(match shared {
+            Some((start, end)) => (start.max(first), end.min(last)),
+            None => (first, last),
+        });
+    }
+
+    let (covered_start, covered_end) = shared.expect("select() never returns an empty agency list");
+
+    if covered_start > covered_end {
+        anyhow::bail!(
+            "the selected agencies share no service dates; \
+             build them one at a time, or pass --from and --to explicitly"
+        );
+    }
+
+    let start = from.unwrap_or(covered_start);
     let end = match (to, days) {
         (Some(to), _) => to,
-        (None, Some(days)) if days > 0 => calendar
-            .active_dates()
-            .into_iter()
-            .filter(|d| *d >= start)
-            .nth(days as usize - 1)
-            // Fewer service dates remain than were asked for; take what there
-            // is rather than failing on a window that is merely optimistic.
-            .unwrap_or(last),
-        (None, Some(_)) => anyhow::bail!("--days must be at least 1"),
-        (None, None) => last,
+        // Calendar days rather than service dates: the window has to mean the
+        // same span for every agency, and they do not have service on the same
+        // set of days.
+        (None, Some(days)) => (start + Duration::days(days as i64 - 1)).min(covered_end),
+        (None, None) => covered_end,
     };
 
     if end < start {
-        anyhow::bail!("--to {end} is before --from {start}");
+        anyhow::bail!("the requested window {start} .. {end} is empty");
     }
 
     Ok(Some((start, end)))
