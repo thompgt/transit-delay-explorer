@@ -97,8 +97,24 @@ def load_routes(root: Path | None = None) -> pd.DataFrame:
 
 
 def load_stops(root: Path | None = None) -> pd.DataFrame:
-    """Load the stops dimension, concatenated across agencies."""
-    return _load_dimension(root, "stops")
+    """Load the stops dimension, with the station name resolved onto each row.
+
+    The geography hierarchy has a station level above the platform level, and
+    the ingest gives every stop a `station_key` but no station *name* — for a
+    subway platform that key points at another row of this same table. Resolved
+    here rather than in the ingest because it is a display concern that would
+    otherwise duplicate the station name across every one of its platforms in
+    the Parquet.
+    """
+    stops = _load_dimension(root, "stops")
+
+    names = stops.set_index("stop_key")["stop_name"]
+    # Stations that no row defines fall back to their key rather than to NaN:
+    # a null member would collapse every such platform into one bucket under a
+    # single "no station" parent, which reads as a data-free hierarchy rather
+    # than as a gap in one dimension row.
+    stops["station_name"] = stops["station_key"].map(names).fillna(stops["station_key"])
+    return stops
 
 
 def build_calendar(

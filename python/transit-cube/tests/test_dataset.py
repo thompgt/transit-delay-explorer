@@ -127,11 +127,16 @@ def dataset(tmp_path: Path) -> Path:
     pq.write_table(
         pa.table(
             {
-                "stop_key": pa.array(["MTA_NYCT:101N"], pa.string()),
-                "stop_id": pa.array(["101N"], pa.string()),
-                "agency_id": pa.array(["MTA_NYCT"], pa.string()),
-                "station_key": pa.array(["MTA_NYCT:101"], pa.string()),
-                "borough": pa.array(["Unknown"], pa.string()),
+                # The station and one of its platforms, which is the shape the
+                # subway feed has: the platform's station_key points at another
+                # row of this same table.
+                "stop_key": pa.array(["MTA_NYCT:101", "MTA_NYCT:101N"], pa.string()),
+                "stop_id": pa.array(["101", "101N"], pa.string()),
+                "agency_id": pa.array(["MTA_NYCT"] * 2, pa.string()),
+                "stop_name": pa.array(["Van Cortlandt Park-242 St"] * 2, pa.string()),
+                "is_station": pa.array([True, False], pa.bool_()),
+                "station_key": pa.array(["MTA_NYCT:101"] * 2, pa.string()),
+                "borough": pa.array(["Unknown"] * 2, pa.string()),
             }
         ),
         stops / "MTA_NYCT.parquet",
@@ -212,7 +217,35 @@ def test_dimensions_load(dataset: Path) -> None:
     stops = load_stops(dataset)
 
     assert routes["route_key"].tolist() == ["MTA_NYCT:1"]
-    assert stops["station_key"].tolist() == ["MTA_NYCT:101"]
+    assert stops["station_key"].tolist() == ["MTA_NYCT:101"] * 2
+
+
+def test_stops_carry_their_station_name(dataset: Path) -> None:
+    """The platform level sits under a station level, and the ingest supplies
+    the station key but not its name."""
+    stops = load_stops(dataset).set_index("stop_key")
+
+    assert stops.loc["MTA_NYCT:101N", "station_name"] == "Van Cortlandt Park-242 St"
+
+
+def test_a_station_with_no_row_falls_back_to_its_key(tmp_path: Path) -> None:
+    """A null member would collapse every orphaned platform under one parent."""
+    stops = tmp_path / "data" / "parquet" / "stops"
+    stops.mkdir(parents=True)
+    pq.write_table(
+        pa.table(
+            {
+                "stop_key": pa.array(["MTA_LIRR:8"], pa.string()),
+                "stop_name": pa.array(["Hicksville"], pa.string()),
+                "station_key": pa.array(["MTA_LIRR:missing"], pa.string()),
+            }
+        ),
+        stops / "MTA_LIRR.parquet",
+    )
+
+    loaded = load_stops(tmp_path / "data" / "parquet")
+
+    assert loaded["station_name"].tolist() == ["MTA_LIRR:missing"]
 
 
 def test_a_missing_table_names_itself(tmp_path: Path) -> None:
