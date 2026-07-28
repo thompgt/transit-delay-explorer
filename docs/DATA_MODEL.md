@@ -63,7 +63,17 @@ that is what the cube joins on. The natural id is kept alongside it for display.
 - **`routes`** — `route_key`, `route_id`, `agency_id`, `mode`, short/long name, color
 - **`stops`** — `stop_key`, `stop_id`, `agency_id`, `name`, lat/lon,
   `parent_station_key`, `borough`, `municipality`
-- **`calendar`** — `service_date`, `day_type`, `is_holiday`, `service_period`
+- **`calendar`** — `service_date`, `day_type`, `is_holiday`, `year`, `month`,
+  `day_of_week`. Built from the service dates the facts actually contain rather
+  than from a date range, so the dimension cannot disagree with the fact table
+  about which days exist.
+
+`service_period` is deliberately **not** in the calendar dimension. It is a
+property of the time of day, not of the date, so it cannot be keyed by
+`service_date`; it is derived onto the fact rows from the agency-local hour of
+`scheduled_arrival`. `local_hour` is derived alongside it, for the same reason —
+facts are stored in UTC and slicing on the UTC hour would put a New York morning
+rush-hour train in the middle of the night.
 
 `borough` and `municipality` exist in no GTFS feed. They are derived from
 lat/lon by point-in-polygon against boundary geometry at load time, and default
