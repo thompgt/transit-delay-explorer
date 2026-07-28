@@ -58,11 +58,13 @@ jobs:
         with:
           # Atoti Community Edition does not support 3.13.
           python-version: '3.11'
-      # The cube tests cover the pure calendar logic and need no Atoti session,
-      # so CI installs only the dev extras rather than pulling the JVM-backed
-      # Atoti distribution on every run.
-      - run: pip install pytest ruff
+      # The cube tests cover the calendar logic and the Parquet loader, neither
+      # of which needs an Atoti session, so CI installs pandas and pyarrow but
+      # not the JVM-backed Atoti distribution. The loader tests write their own
+      # fixture dataset, so no ingest run is required either.
+      - run: pip install pytest ruff pandas pyarrow
       - run: ruff check src tests
+      - run: ruff format --check src tests
       - run: python -m pytest -q
 
   infra:
