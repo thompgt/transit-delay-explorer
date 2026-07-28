@@ -96,6 +96,21 @@ pub enum FeedError {
     #[error("`{value}` in {file} is not a valid GTFS date (expected YYYYMMDD)")]
     BadDate { file: String, value: String },
 
+    /// GTFS defines exactly two exception types. A third means the producer
+    /// intended something we cannot infer, and inferring would misstate service.
+    #[error("unknown exception_type `{value}` for service `{service_id}` in calendar_dates.txt")]
+    BadExceptionType { service_id: String, value: u8 },
+
+    /// A service range long enough to be a garbled `end_date` rather than real
+    /// service. Expanding one would produce millions of dates and look like a
+    /// hang instead of a parse error.
+    #[error("service `{service_id}` spans an implausible range {start}..={end}")]
+    ImplausibleServiceRange {
+        service_id: String,
+        start: String,
+        end: String,
+    },
+
     /// A local time that does not exist, or exists twice, because of a DST
     /// transition. Real and unavoidable for overnight service.
     #[error("local time {local} is ambiguous or nonexistent in {timezone}")]

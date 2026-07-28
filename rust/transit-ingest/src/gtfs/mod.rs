@@ -4,14 +4,17 @@
 //! - [`records`] — one row type per file, tolerant of per-agency column sets
 //! - [`time`] — GTFS times, which count past 24:00:00, and their resolution to
 //!   absolute instants
+//! - [`calendar`] — service ids expanded into the dates they actually run
 //! - [`validate`] — foreign keys, which the format does not enforce
 
 pub mod archive;
+pub mod calendar;
 pub mod records;
 pub mod time;
 pub mod validate;
 
 pub use archive::StaticFeed;
+pub use calendar::ServiceCalendar;
 pub use records::{
     AgencyRow, CalendarDateRow, CalendarRow, RouteRow, StopRow, StopTimeRow, TripRow,
 };
