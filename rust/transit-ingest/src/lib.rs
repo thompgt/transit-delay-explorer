@@ -7,10 +7,12 @@
 //!   referential integrity violations
 //! - [`gtfs`] — static feed row types and GTFS time handling
 //! - [`schedule`] — the join from feed to scheduled stop events, per service date
+//! - [`dataset`] — Parquet output, the handoff to the cube and the Java service
 //!
-//! Parquet output and the realtime poller land in later phases.
+//! The realtime poller lands in a later phase.
 
 pub mod config;
+pub mod dataset;
 pub mod error;
 pub mod gtfs;
 pub mod schedule;

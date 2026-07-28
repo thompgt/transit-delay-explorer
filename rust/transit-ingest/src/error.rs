@@ -25,6 +25,18 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
+
+    /// Building a record batch whose columns do not match the schema. A bug in
+    /// this crate rather than a bad feed, but it still needs a variant.
+    #[error("failed to build an Arrow record batch")]
+    Arrow(#[from] arrow::error::ArrowError),
+
+    #[error("failed to write Parquet at {path}")]
+    Parquet {
+        path: PathBuf,
+        #[source]
+        source: Box<parquet::errors::ParquetError>,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
