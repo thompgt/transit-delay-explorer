@@ -61,5 +61,48 @@ services:
       - ./scripts:/scripts:ro
     restart: "no"
 
+  # The Atoti cube and its dashboard.
+  #
+  # Under a profile because it is not part of the broker stack and starting it
+  # unasked would pull a JVM-backed image and bind a port for anyone who only
+  # wanted Redpanda:
+  #
+  #   docker compose -f infra/docker-compose.yml --profile cube up cube
+  #
+  # The repo is mounted read-only rather than copied in, so editing the cube
+  # definition is an edit and a restart rather than an image rebuild. It reads
+  # the Parquet the Rust ingest writes; nothing here produces it.
+  cube:
+    profiles: ["cube"]
+    image: tde-cube:latest
+    build:
+      context: ../python/transit-cube
+      dockerfile: Dockerfile
+    container_name: tde-cube
+    working_dir: /app
+    command: ["python", "-m", "transit_cube.serve"]
+    environment:
+      TDE_DATA_DIR: /app/data
+      # Fixed rather than ephemeral: a dashboard whose URL moves on every
+      # restart cannot be bookmarked. Atoti's SessionConfig has no host
+      # setting -- the server binds every interface -- so publishing the port
+      # is all that is needed to reach it from the host.
+      TDE_CUBE_PORT: "9090"
+      # Optional: comma-separated YYYY-MM-DD service dates. The load prunes at
+      # the partition level, so restricting it is the difference between
+      # seconds and minutes on a full window.
+      # TDE_CUBE_DATES: "2026-05-26,2026-05-27"
+      # Dashboards are saved server-side. The repo is mounted read-only, so
+      # without a writable location every dashboard would be lost on restart --
+      # which for a project whose deliverable *is* the dashboard would be a poor
+      # trade for the safety of a read-only mount.
+      TDE_CUBE_CONTENT: /var/lib/atoti
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../:/app:ro
+      - cube-content:/var/lib/atoti
+
 volumes:
   redpanda-data:
+  cube-content:
