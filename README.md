@@ -57,6 +57,10 @@ docker run --rm -v "$PWD:/app" -w /app maven:3.9-eclipse-temurin-21 mvn -B verif
 
 # Python — Atoti CE does not support 3.13, so the cube pins 3.11
 cd python/transit-cube && pip install -e ".[dev]" && pytest
+
+# ...or containerized, which is the only form that runs the cube tests
+docker build -t tde-cube:latest python/transit-cube
+docker run --rm -v "$PWD:/app:ro" -w /app/python/transit-cube tde-cube:latest pytest
 ```
 
 ## Configuration
@@ -115,6 +119,40 @@ data/parquet/
 One file per agency per date: the three feeds are re-ingested independently, so
 rebuilding the Subway must not rewrite a file that also holds LIRR rows.
 
+## The cube
+
+Once a dataset exists, one command serves it:
+
+```bash
+docker compose -f infra/docker-compose.yml --profile cube up --build cube
+```
+
+The dashboard is then at <http://localhost:9090>. It is behind a profile
+because it is not part of the broker stack — `up -d` on its own still starts
+only Redpanda. The repo is mounted read-only, so changing a measure is an edit
+and a restart rather than an image rebuild; saved dashboards live in a volume
+and survive one.
+
+Set `TDE_CUBE_DATES` to a comma-separated list of `YYYY-MM-DD` service dates to
+load only those. The load prunes at the partition level, so on a full window
+that is the difference between seconds and minutes.
+
+Every measure is a **schedule** measure — scheduled stops and trips, trips per
+service day, stops per trip, mean dwell, and the overnight share. The realtime
+columns exist in the fact table and are typed, but stay null until Phase 3
+fills them; a p90 of nothing does not belong in a dashboard. They arrive in
+Phase 5 against this same schema, which is the whole reason the cube is built
+this early: an awkward hierarchy costs an edit now and a rewrite later.
+
+Two structural facts about the model, both forced rather than chosen:
+
+- **Every join key is namespaced.** `route_id` `1` names three unrelated
+  railroads across the MTA's feeds, so joins are on `{agency_id}:{id}`.
+- **A hierarchy cannot span tables.** Atoti builds each from one table's
+  columns, which splits calendar time in two: the date levels belong to the
+  calendar dimension and the hour to the fact row. They are exposed as
+  `Calendar` and `Hour of Day` rather than faked into one hierarchy.
+
 ## Status
 
 Built in phases; see [`docs/WORKPLAN.md`](docs/WORKPLAN.md).
@@ -122,7 +160,8 @@ Built in phases; see [`docs/WORKPLAN.md`](docs/WORKPLAN.md).
 - [x] Phase 0 — Foundations: monorepo, broker, topics, verified round trip
 - [x] Phase 1 — Rust static ingest: fetch, parse, validate, resolve, and write a
   partitioned Parquet dataset for a service week
-- [ ] Phase 2 — Atoti cube v1 (static data)
+- [x] Phase 2 — Atoti cube v1: the schema, hierarchies and schedule measures,
+  on static data and before any streaming is built on top of them
 - [ ] Phase 3 — Rust realtime ingest
 - [ ] Phase 4 — Java streaming service
 - [ ] Phase 5 — Cube v2, the real measures
