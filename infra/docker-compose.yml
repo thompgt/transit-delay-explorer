@@ -98,7 +98,9 @@ services:
       # trade for the safety of a read-only mount.
       TDE_CUBE_CONTENT: /var/lib/atoti
     ports:
-      - "9090:9090"
+      # 9090 is also Prometheus's default, so the host side is overridable:
+      # TDE_CUBE_HOST_PORT=9095 docker compose ... --profile cube up cube.
+      - "${TDE_CUBE_HOST_PORT:-9090}:9090"
     volumes:
       - ../:/app:ro
       - cube-content:/var/lib/atoti

@@ -81,9 +81,7 @@ def start_session(
     keeps them in memory and every dashboard is lost on restart — acceptable for
     a test, not for a project whose deliverable is the dashboard.
     """
-    return tt.Session.start(
-        tt.SessionConfig(port=port, user_content_storage=content_storage)
-    )
+    return tt.Session.start(tt.SessionConfig(port=port, user_content_storage=content_storage))
 
 
 def load_tables(
