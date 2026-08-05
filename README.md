@@ -4,6 +4,15 @@ A multi-language analytics platform over public transit data. Rust ingests and
 transforms GTFS, Java runs the real-time streaming layer, and Atoti (Python
 Community Edition) provides the OLAP cube and dashboard.
 
+## Tech Stack
+
+![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)
+![Java](https://img.shields.io/badge/Java-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Apache Kafka](https://img.shields.io/badge/Apache%20Kafka-231F20?style=for-the-badge&logo=apachekafka&logoColor=white)
+![Apache Parquet](https://img.shields.io/badge/Apache%20Parquet-50ABF1?style=for-the-badge&logoColor=white)
+![Atoti](https://img.shields.io/badge/Atoti-0B5FFF?style=for-the-badge&logoColor=white)
+
 ```
 GTFS Static (zip) ─┐
                    ├──> [Rust: transit-ingest] ──> Kafka topic ──> [Java: transit-stream]
