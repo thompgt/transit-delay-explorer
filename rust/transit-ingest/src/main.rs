@@ -375,6 +375,9 @@ fn print_summary(summary: &dataset::Summary) {
     if summary.untimed_stop_times > 0 {
         println!("  untimed, dropped{:>9}", summary.untimed_stop_times);
     }
+    if summary.malformed_times > 0 {
+        println!("  unparseable time{:>9}", summary.malformed_times);
+    }
     if summary.dates_empty > 0 {
         println!("  empty dates     {:>9}", summary.dates_empty);
     }

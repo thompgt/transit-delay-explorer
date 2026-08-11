@@ -72,6 +72,13 @@ pub struct Stats {
     /// do not: an interpolated time is a guess, and a delay measured against a
     /// guess is not a measurement. They are counted and dropped.
     pub untimed_stop_times: usize,
+    /// Stop times whose arrival or departure could not be parsed at all — an
+    /// `8:5:00`, a stray `HH:MM`, a blank that is not blank. Counted and
+    /// dropped like an untimed row rather than aborting the build: the
+    /// validator's whole philosophy is to report everything in one pass, and a
+    /// single bad cell taking down a seven-day tri-agency run means the operator
+    /// learns about one broken row per attempt.
+    pub malformed_times: usize,
     pub crossing_midnight: usize,
 }
 
@@ -163,8 +170,16 @@ impl<'a> Schedule<'a> {
                 stats.trips += 1;
 
                 for stop_time in stop_times {
-                    let arrival = GtfsTime::parse(&stop_time.arrival_time, "stop_times.txt")?;
-                    let departure = GtfsTime::parse(&stop_time.departure_time, "stop_times.txt")?;
+                    // A row this malformed cannot be measured against, which is
+                    // the same situation as an untimed one and gets the same
+                    // treatment: count it, drop it, keep going.
+                    let (Ok(arrival), Ok(departure)) = (
+                        GtfsTime::parse(&stop_time.arrival_time, "stop_times.txt"),
+                        GtfsTime::parse(&stop_time.departure_time, "stop_times.txt"),
+                    ) else {
+                        stats.malformed_times += 1;
+                        continue;
+                    };
 
                     // One time standing in for the other is the common case at
                     // stops where a vehicle does not wait; a stop with neither
@@ -228,6 +243,18 @@ impl<'a> Schedule<'a> {
                 date = %service_date,
                 dropped = stats.untimed_stop_times,
                 "dropped stop_times with no arrival or departure"
+            );
+        }
+
+        // Once per date rather than once per row: a feed that gets this wrong
+        // usually gets it wrong for a whole export, and a per-row warning would
+        // bury every other line of the run.
+        if stats.malformed_times > 0 {
+            warn!(
+                agency = %self.agency.id,
+                date = %service_date,
+                dropped = stats.malformed_times,
+                "dropped stop_times whose arrival or departure could not be parsed"
             );
         }
 
@@ -488,6 +515,33 @@ mod tests {
     }
 
     #[test]
+    fn an_unparseable_time_is_dropped_and_counted_rather_than_fatal() {
+        // This used to propagate, so one bad cell anywhere in a feed took down
+        // a whole multi-day multi-agency build -- and the operator learned
+        // about exactly one broken row per attempt. The untimed case one line
+        // away was already counted and skipped; this now matches it.
+        let mut feed = feed();
+        feed.stop_times[0].arrival_time = "8:5".to_string();
+        let agency = agency();
+        let schedule = Schedule::index(&feed, &agency).unwrap();
+
+        let (events, stats) = schedule.for_date(date(2026, 4, 1)).unwrap();
+        assert_eq!(events.len(), 1, "the sound row still resolves");
+        assert_eq!(stats.malformed_times, 1);
+        assert_eq!(stats.untimed_stop_times, 0, "malformed is not untimed");
+    }
+
+    #[test]
+    fn a_clean_feed_reports_no_malformed_times() {
+        let feed = feed();
+        let agency = agency();
+        let schedule = Schedule::index(&feed, &agency).unwrap();
+
+        let (_, stats) = schedule.for_date(date(2026, 4, 1)).unwrap();
+        assert_eq!(stats.malformed_times, 0);
+    }
+
+    #[test]
     fn calls_are_ordered_by_stop_sequence_not_file_order() {
         // GTFS does not require stop_times.txt to be sorted, and dwell and
         // headway both depend on the order of calls along the trip.
@@ -578,14 +632,19 @@ mod tests {
     }
 
     #[test]
-    fn a_malformed_time_fails_the_date_rather_than_being_skipped() {
+    fn a_malformed_time_does_not_take_the_rest_of_the_date_with_it() {
+        // The inverse of the old contract, deliberately. Failing the date meant
+        // one unparseable cell aborted a seven-day tri-agency build, so the
+        // operator found out about broken rows one attempt at a time -- the
+        // opposite of what `validate::check` does two modules away.
         let mut feed = feed();
         feed.stop_times[0].arrival_time = "not a time".to_string();
         let agency = agency();
         let schedule = Schedule::index(&feed, &agency).unwrap();
 
-        let err = schedule.for_date(date(2026, 4, 1)).unwrap_err();
-        assert!(err.to_string().contains("not a time"), "got: {err}");
+        let (events, stats) = schedule.for_date(date(2026, 4, 1)).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(stats.malformed_times, 1);
     }
 
     #[test]

@@ -49,7 +49,7 @@ parsing with `csv` + `serde` and `Option<T>` for GTFS's genuinely optional
 fields, streaming zip extraction, `chrono`/`chrono-tz` for timezone- and
 DST-correct instant resolution, `thiserror` error enums with one variant per
 failure mode, and Arrow `RecordBatch` construction written straight to
-zstd-compressed Parquet via `arrow` + `parquet` 53. 129 unit tests in-tree.
+zstd-compressed Parquet via `arrow` + `parquet` 53. 137 unit tests in-tree.
 
 **Java** — Spring Boot 3.3 on Java 21: records as the domain model, Spring Kafka
 consumers, Actuator (health/metrics/Prometheus), virtual threads enabled for the
@@ -298,7 +298,11 @@ rather than chosen:
    midnight — on a DST transition day those differ by an hour, and noon is
    always unambiguous. Resolution is per service date (a week of Subway service
    is millions of events; materialising a whole feed at once is gigabytes for no
-   benefit) and the expensive `stop_times`-by-trip index is built once.
+   benefit) and the expensive `stop_times`-by-trip index is built once. A stop
+   time with no usable time — none at all, or one that will not parse — is
+   counted and dropped with one warning per date, not thrown: a single bad cell
+   must not abort a seven-day tri-agency build, which is the same
+   report-everything stance `validate::check` takes.
 
 5. **Write** (`dataset/`). Arrow `RecordBatch` → zstd Parquet, Hive-partitioned,
    one file per agency per date so re-ingesting the Subway never rewrites a file

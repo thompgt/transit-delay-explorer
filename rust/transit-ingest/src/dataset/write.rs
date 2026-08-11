@@ -72,6 +72,9 @@ pub struct Summary {
     pub events: usize,
     pub trips: usize,
     pub untimed_stop_times: usize,
+    /// Stop times dropped because a time would not parse. Non-zero means the
+    /// feed is broken in a way worth chasing, but not worth aborting over.
+    pub malformed_times: usize,
     pub crossing_midnight: usize,
     pub routes: usize,
     pub stops: usize,
@@ -110,6 +113,7 @@ pub fn build(
         events: 0,
         trips: 0,
         untimed_stop_times: 0,
+        malformed_times: 0,
         crossing_midnight: 0,
         routes: feed.routes.len(),
         stops: feed.stops.len(),
@@ -122,6 +126,7 @@ pub fn build(
 
         summary.trips += stats.trips;
         summary.untimed_stop_times += stats.untimed_stop_times;
+        summary.malformed_times += stats.malformed_times;
         summary.crossing_midnight += stats.crossing_midnight;
 
         // An empty partition is a file that every reader must open to learn it
