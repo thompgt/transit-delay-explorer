@@ -36,6 +36,10 @@ management:
     health:
       show-details: always
 
+# Bound and validated by dev.thompgt.transit.stream.config.TdeProperties, which
+# is asserted against this file by TdePropertiesTest. Every key below has a
+# field there; add a key without one and it does nothing, silently, which is
+# how this block spent its first life.
 tde:
   topics:
     stop-events: transit.stop_events

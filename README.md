@@ -54,7 +54,10 @@ zstd-compressed Parquet via `arrow` + `parquet` 53. 138 unit tests in-tree.
 **Java** — Spring Boot 3.3 on Java 21: records as the domain model, Spring Kafka
 consumers, Actuator (health/metrics/Prometheus), virtual threads enabled for the
 SSE endpoint's thread-per-subscriber workload, `@ConfigurationPropertiesScan`
-for typed config, and `t-digest` for bounded-memory streaming percentiles.
+onto a validated `TdeProperties` record — with a context test asserting the
+checked-in YAML binds key for key, so a typo in it fails the build rather than
+silently doing nothing — and `t-digest` for bounded-memory streaming
+percentiles.
 
 **Python** — Atoti Community Edition cube design (manual-mode cube, hierarchies,
 dimension assignment, derived and aggregated measures), `pyarrow.dataset` with
@@ -147,6 +150,7 @@ contracts/               The wire contract between the two halves.
 java/transit-stream/     Spring Boot 3.3 / Java 21
   .../TransitStreamApplication.java   entrypoint (scheduling enabled)
   .../domain/StopEvent.java           the wire record shared with the ingest
+  .../config/TdeProperties.java       validated binding for the tde: block
   resources/application.yml           topics, windows, thresholds, Parquet dir
 
 python/transit-cube/     Atoti Community Edition
