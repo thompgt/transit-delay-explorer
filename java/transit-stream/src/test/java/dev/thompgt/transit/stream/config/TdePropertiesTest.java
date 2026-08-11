@@ -29,7 +29,7 @@ class TdePropertiesTest {
 
     /** The real file, loaded the way the application loads it. */
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withInitializers(new ConfigDataApplicationContextInitializer())
+            .withInitializer(new ConfigDataApplicationContextInitializer())
             .withConfiguration(AutoConfigurations.of(
                     ConfigurationPropertiesAutoConfiguration.class, ValidationAutoConfiguration.class))
             .withUserConfiguration(Enable.class);

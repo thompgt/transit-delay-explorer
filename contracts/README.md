@@ -1,6 +1,13 @@
-# Wire contracts
+# Contracts
 
-`stop_event.json` is the golden fixture for the `transit.stop_events` topic: one
+Things more than one language has to agree about, kept in one file each and
+asserted against from both sides. The pattern is the point: a definition that
+exists twice will eventually differ, and the failures it causes are the quiet
+kind — a field that binds to null, a boundary hour that lands in two buckets.
+
+## `stop_event.json`
+
+The golden fixture for the `transit.stop_events` topic: one
 realtime stop event exactly as the Rust producer will publish it and the Java
 consumer parses it.
 
