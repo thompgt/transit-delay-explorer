@@ -86,6 +86,31 @@ jobs:
       - run: ruff format --check src tests
       - run: python -m pytest -q
 
+  cube-image:
+    # The image the cube actually runs as. Nothing built it automatically
+    # before, so a Dockerfile that no longer built -- or that installed a
+    # different dependency set than CI -- would have been found by whoever next
+    # ran `--profile cube up`, which is to say by hand.
+    #
+    # It runs the suite again inside the container rather than trusting the
+    # matching versions: the image is the only environment the compose profile
+    # ever uses, and "the tests pass on a runner" is not the same claim.
+    name: python / cube image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t tde-cube:ci python/transit-cube
+      - name: Atoti is importable
+        run: docker run --rm tde-cube:ci
+      - name: Tests, inside the image
+        # Read-only, exactly as compose mounts it, so a test that writes into
+        # the repo fails here rather than after it has already done so.
+        # /tmp is the fixture and Atoti scratch space.
+        run: |
+          docker run --rm -v "$PWD:/app:ro" -w /app/python/transit-cube \
+            tde-cube:ci python -m pytest -q -p no:cacheprovider
+
   infra:
     name: infra / broker round trip
     runs-on: ubuntu-latest
