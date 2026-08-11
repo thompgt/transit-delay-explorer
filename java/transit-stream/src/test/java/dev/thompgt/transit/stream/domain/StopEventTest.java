@@ -2,6 +2,7 @@ package dev.thompgt.transit.stream.domain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -88,5 +89,35 @@ class StopEventTest {
         assertEquals(120, parsed.delaySeconds());
         assertEquals(LocalDate.of(2026, 7, 26), parsed.serviceDate());
         assertTrue(parsed.hasDelayMeasurement());
+    }
+
+    /**
+     * GTFS makes {@code direction_id} optional and some LIRR trips leave it blank, which the
+     * ingest preserves as a null Parquet value. A primitive here would let Jackson map both an
+     * explicit null and an omitted field to 0 — a real direction — silently inflating one side of
+     * every directional comparison.
+     */
+    @Test
+    void anUnstatedDirectionStaysNullRatherThanBecomingZero() throws Exception {
+        var mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        var explicitNull = """
+                {"eventId": "abc123", "directionId": null}
+                """;
+        var omitted = """
+                {"eventId": "abc123"}
+                """;
+
+        assertNull(mapper.readValue(explicitNull, StopEvent.class).directionId());
+        assertNull(mapper.readValue(omitted, StopEvent.class).directionId());
+    }
+
+    @Test
+    void aStatedDirectionSurvives() throws Exception {
+        var mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        var json = """
+                {"eventId": "abc123", "directionId": 1}
+                """;
+
+        assertEquals(Integer.valueOf(1), mapper.readValue(json, StopEvent.class).directionId());
     }
 }

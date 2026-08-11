@@ -14,8 +14,14 @@ import java.time.LocalDate;
  * unrelated railroads into one line.
  *
  * <p>Nullable by design: {@code actualArrival} and {@code delaySeconds} are
- * absent for a cancelled trip, and {@code headwaySeconds} is absent for the
- * first vehicle of the day on a route/stop/direction.
+ * absent for a cancelled trip, {@code headwaySeconds} is absent for the
+ * first vehicle of the day on a route/stop/direction, and {@code directionId}
+ * is absent wherever the feed declined to state one. GTFS makes
+ * {@code direction_id} optional and some LIRR trips leave it blank, so the
+ * ingest writes it as a nullable Parquet column rather than defaulting it —
+ * {@code 0} is a real direction, and a primitive here would let Jackson turn
+ * every unstated direction into direction 0, inflating one side of every
+ * directional comparison.
  *
  * @param eventId        hash of agency + trip + stop + service date
  * @param serviceDate    agency-local service date, the Parquet partition key
@@ -26,7 +32,7 @@ import java.time.LocalDate;
  * @param stopKey        {@code {agencyId}:{stopId}}
  * @param stopId         raw GTFS stop id
  * @param stopSequence   position along the trip
- * @param directionId    0 or 1
+ * @param directionId    0 or 1, or null where the feed does not state one
  * @param scheduledArrival resolved from GTFS, midnight-rollover aware
  * @param actualArrival  null when the trip was cancelled
  * @param delaySeconds   negative means early; null when cancelled
@@ -46,7 +52,7 @@ public record StopEvent(
         String stopKey,
         String stopId,
         int stopSequence,
-        int directionId,
+        Integer directionId,
         Instant scheduledArrival,
         Instant actualArrival,
         Integer delaySeconds,
