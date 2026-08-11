@@ -22,6 +22,7 @@ One row per vehicle arrival at a stop. Partitioned by `service_date`.
 | `dwell_seconds` | int | Departure minus arrival |
 | `headway_seconds` | int | Gap since previous vehicle on this route/stop/direction |
 | `is_cancelled` | bool | |
+| `schedule_relationship` | string | Nullable — the GTFS-RT spec name: `SCHEDULED`, `ADDED`, `UNSCHEDULED`, `CANCELED`, `DUPLICATED`, `DELETED`, `SKIPPED`, `NO_DATA`. Only `SCHEDULED` yields a usable delay: an `ADDED` trip has no static schedule to be late against, and `is_cancelled` alone cannot say so |
 | `vehicle_id` | string | Nullable |
 
 `scheduled_events` is the same shape restricted to the static feed: every

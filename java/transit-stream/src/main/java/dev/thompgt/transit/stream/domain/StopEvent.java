@@ -47,6 +47,9 @@ import java.time.LocalDate;
  * @param dwellSeconds   departure minus arrival
  * @param headwaySeconds gap since the previous vehicle on this route/stop/direction
  * @param cancelled      whether the realtime feed cancelled this trip
+ * @param scheduleRelationship how this update relates to the static schedule;
+ *                       null where the feed did not state one, which is not
+ *                       the same as {@code SCHEDULED}
  * @param vehicleId      nullable — not every feed reports one
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -71,6 +74,7 @@ public record StopEvent(
         // Parquet column is is_cancelled, and the wire follows the Parquet
         // vocabulary rather than the Java one.
         @JsonProperty("is_cancelled") boolean cancelled,
+        ScheduleRelationship scheduleRelationship,
         String vehicleId) {
 
     /**
@@ -78,8 +82,21 @@ public record StopEvent(
      * and events still awaiting an actual arrival must not be folded into
      * delay aggregates — counting a cancellation as zero delay is the single
      * easiest way to make a struggling route look punctual.
+     *
+     * <p>{@code SCHEDULED} is required, not merely "not cancelled". A delay is
+     * a difference against a static scheduled time, so it only means anything
+     * where a static schedule exists: an {@code ADDED} trip has none, and a
+     * {@code SKIPPED} stop was never called at. Both would otherwise pass this
+     * check on a non-null {@code delaySeconds} and be averaged in.
+     *
+     * <p>An unstated relationship is also excluded. Treating null as
+     * {@code SCHEDULED} would be the same mistake as defaulting an absent
+     * direction to 0 — reading silence as the permissive answer — and it errs
+     * in the direction that flatters the numbers.
      */
     public boolean hasDelayMeasurement() {
-        return !cancelled && delaySeconds != null;
+        return scheduleRelationship == ScheduleRelationship.SCHEDULED
+                && !cancelled
+                && delaySeconds != null;
     }
 }

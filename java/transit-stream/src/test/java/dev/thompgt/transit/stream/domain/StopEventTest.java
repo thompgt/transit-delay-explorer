@@ -25,6 +25,11 @@ class StopEventTest {
     private static final Path CONTRACT = Path.of("..", "..", "contracts", "stop_event.json");
 
     private static StopEvent event(Integer delaySeconds, boolean cancelled) {
+        return event(delaySeconds, cancelled, ScheduleRelationship.SCHEDULED);
+    }
+
+    private static StopEvent event(
+            Integer delaySeconds, boolean cancelled, ScheduleRelationship relationship) {
         return new StopEvent(
                 "abc123",
                 LocalDate.of(2026, 7, 26),
@@ -42,12 +47,35 @@ class StopEventTest {
                 30,
                 600,
                 cancelled,
+                relationship,
                 "veh-7");
     }
 
     @Test
     void reportsADelayMeasurementWhenOneExists() {
         assertTrue(event(120, false).hasDelayMeasurement());
+    }
+
+    /**
+     * A delay is a difference against a scheduled time, so it only means something where one
+     * exists. An ADDED trip has no static schedule at all and a SKIPPED stop was never called at,
+     * yet both can arrive carrying a delaySeconds — and a boolean `cancelled` waves both through.
+     */
+    @Test
+    void onlyAScheduledRelationshipYieldsAMeasurement() {
+        for (ScheduleRelationship relationship : ScheduleRelationship.values()) {
+            boolean usable = event(120, false, relationship).hasDelayMeasurement();
+            assertEquals(
+                    relationship == ScheduleRelationship.SCHEDULED,
+                    usable,
+                    relationship + " must " + (usable ? "not " : "") + "yield a measurement");
+        }
+    }
+
+    /** Silence is not consent: an unstated relationship is not SCHEDULED. */
+    @Test
+    void anUnstatedRelationshipYieldsNoMeasurement() {
+        assertFalse(event(120, false, null).hasDelayMeasurement());
     }
 
     /** Counting a cancellation as zero delay makes a failing route look punctual. */
@@ -96,6 +124,7 @@ class StopEventTest {
         assertEquals(Integer.valueOf(30), parsed.dwellSeconds());
         assertEquals(Integer.valueOf(600), parsed.headwaySeconds());
         assertFalse(parsed.cancelled());
+        assertEquals(ScheduleRelationship.SCHEDULED, parsed.scheduleRelationship());
         assertEquals("veh-7", parsed.vehicleId());
         assertTrue(parsed.hasDelayMeasurement());
     }
@@ -124,6 +153,7 @@ class StopEventTest {
                   "service_date": "2026-07-26",
                   "delay_seconds": 120,
                   "is_cancelled": false,
+                  "schedule_relationship": "SCHEDULED",
                   "some_field_added_later": 42
                 }
                 """;

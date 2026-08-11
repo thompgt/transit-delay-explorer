@@ -60,6 +60,7 @@ def fact_batch(rows: list[dict]) -> pa.Table:
             "delay_seconds": pa.nulls(len(rows), pa.int32()),
             "headway_seconds": pa.nulls(len(rows), pa.int32()),
             "is_cancelled": pa.nulls(len(rows), pa.bool_()),
+            "schedule_relationship": pa.nulls(len(rows), pa.string()),
             "vehicle_id": pa.nulls(len(rows), pa.string()),
         }
     )

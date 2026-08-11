@@ -191,7 +191,14 @@ partitioned by `service_date`:
 | `scheduled_arrival`, `scheduled_departure` | timestamp(µs, UTC) | |
 | `dwell_seconds` | int32 | |
 | `crosses_midnight` | bool | GTFS time was ≥ `24:00:00` |
-| `actual_arrival`, `delay_seconds`, `headway_seconds`, `is_cancelled`, `vehicle_id` | nullable | realtime columns — **typed nulls today**, filled in Phase 3 |
+| `actual_arrival`, `delay_seconds`, `headway_seconds`, `is_cancelled`, `schedule_relationship`, `vehicle_id` | nullable | realtime columns — **typed nulls today**, filled in Phase 3 |
+
+`schedule_relationship` carries the GTFS-RT spec name rather than being folded
+into `is_cancelled`. The five non-scheduled states do not mean the same thing,
+and one in particular breaks the measurement outright: an `ADDED` trip has no
+static schedule, so its "delay" is a difference against a time that was never
+promised. Only `SCHEDULED` yields a usable delay, which is what
+`StopEvent.hasDelayMeasurement()` enforces.
 
 `service_date` is deliberately **not** a column: it lives in the directory name
 only. Writing it in both places makes every partition-aware reader fail the

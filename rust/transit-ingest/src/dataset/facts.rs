@@ -1,7 +1,7 @@
 //! The `scheduled_events` fact table as Arrow, and its Parquet encoding.
 //!
 //! The schema here is the *full* fact schema from `docs/DATA_MODEL.md`,
-//! including the five columns that only realtime data can populate. Phase 1
+//! including the six columns that only realtime data can populate. Phase 1
 //! writes them as typed nulls.
 //!
 //! That is deliberate. The cube is built in Phase 2 against this table and
@@ -70,6 +70,12 @@ pub fn schema() -> SchemaRef {
         Field::new("delay_seconds", DataType::Int32, true),
         Field::new("headway_seconds", DataType::Int32, true),
         Field::new("is_cancelled", DataType::Boolean, true),
+        // The GTFS-RT schedule relationship as its spec name: SCHEDULED,
+        // SKIPPED, ADDED, CANCELED, DUPLICATED, NO_DATA. `is_cancelled` cannot
+        // stand in for it -- collapsing five distinct states into one boolean
+        // makes an ADDED trip, which has no static schedule to be late against,
+        // indistinguishable from an ordinary on-time one.
+        Field::new("schedule_relationship", DataType::Utf8, true),
         Field::new("vehicle_id", DataType::Utf8, true),
     ]))
 }
@@ -134,6 +140,7 @@ pub fn to_record_batch(events: &[ScheduledEvent]) -> Result<RecordBatch> {
         nulls(&schema, "delay_seconds", rows),
         nulls(&schema, "headway_seconds", rows),
         nulls(&schema, "is_cancelled", rows),
+        nulls(&schema, "schedule_relationship", rows),
         nulls(&schema, "vehicle_id", rows),
     ];
 
@@ -279,6 +286,7 @@ mod tests {
                 "delay_seconds",
                 "headway_seconds",
                 "is_cancelled",
+                "schedule_relationship",
                 "vehicle_id",
             ]
         );
@@ -295,6 +303,7 @@ mod tests {
             "delay_seconds",
             "headway_seconds",
             "is_cancelled",
+            "schedule_relationship",
             "vehicle_id",
         ] {
             let index = batch.schema().index_of(column).unwrap();

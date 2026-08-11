@@ -17,5 +17,6 @@
   "delay_seconds": 120,
   "headway_seconds": 600,
   "is_cancelled": false,
+  "schedule_relationship": "SCHEDULED",
   "vehicle_id": "veh-7"
 }
