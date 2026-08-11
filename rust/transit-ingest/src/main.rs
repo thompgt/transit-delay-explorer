@@ -69,15 +69,14 @@ enum Command {
         #[arg(long)]
         archive: Option<PathBuf>,
         /// First service date to write, `YYYY-MM-DD`. Defaults to the start of
-        /// the feed's own coverage.
+        /// the coverage every selected agency shares.
         #[arg(long)]
         from: Option<NaiveDate>,
-        /// Last service date to write, inclusive.
+        /// Last service date to write, inclusive. Defaults to the end of the
+        /// shared coverage.
         #[arg(long)]
         to: Option<NaiveDate>,
-        /// Write N calendar days from the start of the window. Defaults the
-        /// window to the dates every selected agency covers, so the result is
-        /// comparable across them.
+        /// Write N calendar days from the start of the window.
         #[arg(long, conflicts_with = "to")]
         days: Option<u32>,
         /// Write the dataset even if the feed has integrity violations.
@@ -213,10 +212,9 @@ fn main() -> anyhow::Result<()> {
                     .unwrap_or_else(|| agency.archive_path(&cli.data_dir))
             };
 
-            let window = resolve_window(&agencies, &archive_of, from, to, days)?;
-            if let Some((start, end)) = window {
-                println!("building {start} .. {end}\n");
-            }
+            let (start, end) = resolve_window(&agencies, &archive_of, from, to, days)?;
+            let window = Some((start, end));
+            println!("building {start} .. {end}\n");
 
             for agency in agencies {
                 let path = archive_of(agency);
@@ -271,7 +269,11 @@ fn select<'a>(config: &'a Config, agency: Option<&str>) -> anyhow::Result<Vec<&'
 /// unanswerable on a dataset like that, and nothing about it looks wrong until
 /// you slice by agency and one of them is empty.
 ///
-/// So the default window is the intersection of coverage, not the union.
+/// So the default window is the intersection of coverage, not the union — and
+/// that applies to a bare `build` too, not only to one carrying a date flag.
+/// Returning "no window" for the flagless case was the same bug wearing the
+/// default's clothes: each agency then wrote its own full coverage, which is
+/// precisely the misaligned tri-agency dataset this exists to prevent.
 /// `--from` and `--to` override it when a specific window is wanted.
 fn resolve_window(
     agencies: &[&Agency],
@@ -279,10 +281,7 @@ fn resolve_window(
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
     days: Option<u32>,
-) -> anyhow::Result<Option<(NaiveDate, NaiveDate)>> {
-    if from.is_none() && to.is_none() && days.is_none() {
-        return Ok(None);
-    }
+) -> anyhow::Result<(NaiveDate, NaiveDate)> {
     if days == Some(0) {
         anyhow::bail!("--days must be at least 1");
     }
@@ -292,12 +291,12 @@ fn resolve_window(
         if end < start {
             anyhow::bail!("--to {end} is before --from {start}");
         }
-        return Ok(Some((start, end)));
+        return Ok((start, end));
     }
 
     // Only the calendar files are read, so this stays cheap even though it
     // touches every archive before the first one is built.
-    let mut shared: Option<(NaiveDate, NaiveDate)> = None;
+    let mut coverage = Vec::with_capacity(agencies.len());
     for agency in agencies {
         let path = archive_of(agency);
         let calendar = ServiceCalendar::read(&path)?;
@@ -306,6 +305,25 @@ fn resolve_window(
         };
 
         println!("{:<10} covers {first} .. {last}", agency.id);
+        coverage.push((first, last));
+    }
+
+    narrow_window(&coverage, from, to, days)
+}
+
+/// The date arithmetic of [`resolve_window`], with the archives already read.
+///
+/// Split out so the rule that decides the default window is testable without a
+/// GTFS zip on disk — it is the part that was wrong, and it was wrong in the
+/// one case no test could reach.
+fn narrow_window(
+    coverage: &[(NaiveDate, NaiveDate)],
+    from: Option<NaiveDate>,
+    to: Option<NaiveDate>,
+    days: Option<u32>,
+) -> anyhow::Result<(NaiveDate, NaiveDate)> {
+    let mut shared: Option<(NaiveDate, NaiveDate)> = None;
+    for &(first, last) in coverage {
         shared = Some(match shared {
             Some((start, end)) => (start.max(first), end.min(last)),
             None => (first, last),
@@ -335,7 +353,7 @@ fn resolve_window(
         anyhow::bail!("the requested window {start} .. {end} is empty");
     }
 
-    Ok(Some((start, end)))
+    Ok((start, end))
 }
 
 fn print_summary(summary: &dataset::Summary) {
@@ -359,5 +377,74 @@ fn print_summary(summary: &dataset::Summary) {
     }
     if summary.dates_empty > 0 {
         println!("  empty dates     {:>9}", summary.dates_empty);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    /// The three real feeds, near enough: barely-overlapping coverage.
+    fn tri_agency() -> Vec<(NaiveDate, NaiveDate)> {
+        vec![
+            (date(2026, 5, 20), date(2026, 8, 10)),
+            (date(2026, 7, 10), date(2026, 9, 30)),
+            (date(2026, 7, 25), date(2026, 8, 20)),
+        ]
+    }
+
+    /// The regression this whole function exists to prevent.
+    ///
+    /// A bare `build` used to skip the shared window entirely and let each
+    /// agency write its own full coverage — the misaligned dataset the docs
+    /// claim is impossible, produced by the most obvious command in the README.
+    #[test]
+    fn a_flagless_build_still_gets_the_shared_window() {
+        let (start, end) = narrow_window(&tri_agency(), None, None, None).unwrap();
+
+        assert_eq!(start, date(2026, 7, 25), "the latest first date");
+        assert_eq!(end, date(2026, 8, 10), "the earliest last date");
+    }
+
+    #[test]
+    fn one_agency_gets_its_own_coverage() {
+        let coverage = vec![(date(2026, 5, 20), date(2026, 8, 10))];
+        let (start, end) = narrow_window(&coverage, None, None, None).unwrap();
+
+        assert_eq!((start, end), (date(2026, 5, 20), date(2026, 8, 10)));
+    }
+
+    #[test]
+    fn days_counts_from_the_shared_start_and_cannot_run_past_the_shared_end() {
+        let (start, end) = narrow_window(&tri_agency(), None, None, Some(7)).unwrap();
+        assert_eq!((start, end), (date(2026, 7, 25), date(2026, 7, 31)));
+
+        // 60 days from 2026-07-25 would land in September, past the shared end.
+        let (_, clamped) = narrow_window(&tri_agency(), None, None, Some(60)).unwrap();
+        assert_eq!(clamped, date(2026, 8, 10));
+    }
+
+    #[test]
+    fn from_overrides_the_shared_start_without_losing_the_shared_end() {
+        let (start, end) =
+            narrow_window(&tri_agency(), Some(date(2026, 8, 1)), None, None).unwrap();
+        assert_eq!((start, end), (date(2026, 8, 1), date(2026, 8, 10)));
+    }
+
+    #[test]
+    fn agencies_sharing_no_dates_are_an_error_rather_than_an_empty_dataset() {
+        let coverage = vec![
+            (date(2026, 5, 20), date(2026, 6, 10)),
+            (date(2026, 7, 10), date(2026, 9, 30)),
+        ];
+
+        let message = narrow_window(&coverage, None, None, None)
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("share no service dates"), "{message}");
     }
 }

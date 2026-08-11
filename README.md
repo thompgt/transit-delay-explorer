@@ -314,7 +314,8 @@ rather than chosen:
    `build` refuses to write a feed with integrity violations unless given
    `--allow-violations`, since a dataset with dangling keys becomes a cube with
    silently missing slices. When several agencies are built together the default
-   window is the **intersection** of their coverage, not the union: the three
+   window — with or without a date flag — is the **intersection** of their
+   coverage, not the union: the three
    MTA feeds are published on their own schedules and taking each feed's own
    first week gives the Subway late May, Metro-North mid-July and the LIRR the
    end of July, with not one day in common — and nothing looks wrong until you
@@ -378,7 +379,8 @@ cargo run --bin transit-ingest -- inspect MTA_NYCT           # contents + integr
 ```
 
 `build` takes an optional agency id, `--from` / `--to` for an explicit window,
-or `--days N` for N days from the start of the window, plus `--archive <path>`
+or `--days N` for N days from the start of the window; with none of them it
+writes the whole window every selected agency covers. Plus `--archive <path>`
 and `--allow-violations`. `fetch` takes `--force`. `inspect` exits non-zero on
 integrity violations, so it is usable as a gate.
 
