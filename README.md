@@ -393,6 +393,11 @@ part of the broker stack — `up -d` on its own still starts only Redpanda. The
 repo is mounted read-only, so changing a measure is an edit and a restart rather
 than an image rebuild; saved dashboards live in a volume and survive one.
 
+The port is published on **loopback only**. Atoti CE has no authentication and
+its server binds every interface inside the container, so an unqualified
+mapping would hand the whole dataset to anyone on the same network. Set
+`TDE_CUBE_HOST_BIND=0.0.0.0` to expose it deliberately.
+
 ### Configuration
 
 | Variable | Consumer | Meaning |
@@ -402,6 +407,7 @@ than an image rebuild; saved dashboards live in a volume and survive one.
 | `TDE_LOG` | ingest | `tracing` env-filter. Default `info`. |
 | `TDE_CUBE_PORT` | cube | Port Atoti serves on. Default `9090`. |
 | `TDE_CUBE_HOST_PORT` | compose | Host-side port for the cube — 9090 is also Prometheus's default. |
+| `TDE_CUBE_HOST_BIND` | compose | Host interface the cube is published on. Default `127.0.0.1`. |
 | `TDE_CUBE_DATES` | cube | Comma-separated `YYYY-MM-DD` service dates to load. Prunes at the partition level: seconds instead of minutes on a full window. |
 | `TDE_CUBE_CONTENT` | cube | Writable path for saved dashboards. Compose gives it a volume. |
 | `TDE_KAFKA_BOOTSTRAP` | stream | Default `localhost:19092`. |

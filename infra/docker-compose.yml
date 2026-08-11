@@ -98,9 +98,16 @@ services:
       # trade for the safety of a read-only mount.
       TDE_CUBE_CONTENT: /var/lib/atoti
     ports:
+      # Bound to the loopback interface, not to every interface. Atoti has no
+      # authentication in Community Edition and its server binds 0.0.0.0 inside
+      # the container, so an unqualified mapping publishes the entire dataset to
+      # anyone on the same network -- and on a laptop, that is whatever coffee
+      # shop wifi it is on. Set TDE_CUBE_HOST_BIND=0.0.0.0 to expose it
+      # deliberately, on a network where that is what you mean.
+      #
       # 9090 is also Prometheus's default, so the host side is overridable:
       # TDE_CUBE_HOST_PORT=9095 docker compose ... --profile cube up cube.
-      - "${TDE_CUBE_HOST_PORT:-9090}:9090"
+      - "${TDE_CUBE_HOST_BIND:-127.0.0.1}:${TDE_CUBE_HOST_PORT:-9090}:9090"
     volumes:
       - ../:/app:ro
       - cube-content:/var/lib/atoti
