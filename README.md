@@ -167,6 +167,9 @@ infra/
   scripts/create-topics.sh idempotent topic creation
   scripts/smoke-test.sh    produce/consume round trip
 
+justfile                 One entry point across all three toolchains:
+                         fetch/build/cube/test, and a quickstart.
+
 data/                    Feeds and generated Parquet. Gitignored.
 docs/                    DATA_MODEL.md, FEED_NOTES.md, WORKPLAN.md
 ```
@@ -385,8 +388,20 @@ rather than chosen:
 - Optional: **Maven** + **JDK 21** for the Java service, **Python 3.11 or 3.12**
   (`requires-python = ">=3.11,<3.13"` — Atoti CE does not support 3.13) for a
   non-container cube.
+- Optional: [**just**](https://just.systems) — the `justfile` wraps every
+  command below, across all three toolchains.
 
 Run every command from the repository root unless noted.
+
+### The short version
+
+```bash
+just quickstart   # broker, feeds, a week of data, then the cube
+just              # every recipe, with its description
+```
+
+Each recipe is exactly the command spelled out below, so the two cannot drift.
+The rest of this section is what `just` is doing.
 
 ### 1. Bring up the broker
 
@@ -456,6 +471,9 @@ staleness bound, request timeout and per-agency quirks live in
 `config/agencies.toml`.
 
 ### Tests
+
+`just test` runs the Rust, Python and Java suites in CI's order, and
+`just test-cube` runs the Atoti ones inside the image. Spelled out:
 
 ```bash
 # Rust
