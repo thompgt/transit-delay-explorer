@@ -393,6 +393,43 @@ mod tests {
         assert!(path.exists());
     }
 
+    /// The golden wire fixture must speak this schema's vocabulary.
+    ///
+    /// The Java consumer parses the same file. Without this, the two halves of
+    /// the project had no shared definition of the message: the Parquet columns
+    /// are snake_case, the Java record's components are camelCase, and a
+    /// producer following either one would deserialize into a record of nulls
+    /// on the other side without an error anywhere.
+    #[test]
+    fn the_wire_contract_speaks_the_fact_table_vocabulary() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../contracts/stop_event.json");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{} is the shared wire contract: {e}", path.display()));
+        let fixture: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&text).unwrap();
+
+        let schema = schema();
+        for key in fixture.keys() {
+            // service_date is the partition key: it belongs on the wire, but it
+            // lives in the directory name rather than in the file.
+            assert!(
+                key == "service_date" || schema.field_with_name(key).is_ok(),
+                "wire field {key} is not a fact-table column"
+            );
+        }
+
+        // And the other direction: every schedule column has to be on the wire,
+        // or the realtime producer is dropping something the cube reads.
+        for field in schema.fields() {
+            assert!(
+                fixture.contains_key(field.name()),
+                "fact-table column {} is missing from the wire contract",
+                field.name()
+            );
+        }
+    }
+
     #[test]
     fn a_row_count_survives_many_rows() {
         let events: Vec<_> = (1..=5_000).map(event).collect();

@@ -138,6 +138,10 @@ rust/transit-ingest/     Library + thin CLI (`transit-ingest`)
   src/schedule.rs          stop_times → trips → service dates → absolute instants
   src/dataset/             facts.rs, dimensions.rs, write.rs (Arrow → Parquet)
 
+contracts/               The wire contract between the two halves.
+  stop_event.json          golden `transit.stop_events` message, snake_case,
+                           parsed by BOTH the Rust and the Java test suites.
+
 java/transit-stream/     Spring Boot 3.3 / Java 21
   .../TransitStreamApplication.java   entrypoint (scheduling enabled)
   .../domain/StopEvent.java           the wire record shared with the ingest
@@ -245,6 +249,12 @@ rather than chosen:
 
 - **Every join key is namespaced.** `route_id` `1` names three unrelated
   railroads, so joins are on `{agency_id}:{id}`, never the bare id.
+- **One vocabulary on the wire and on disk.** `transit.stop_events` messages are
+  snake_case, matching the Parquet columns, pinned by the golden fixture in
+  [`contracts/`](contracts/README.md) that both test suites parse. The Java
+  record's components stay camelCase and are mapped; a producer and a consumer
+  disagreeing about a field name is the one kind of break that shows up as
+  plausible nulls rather than as an error.
 - **A hierarchy cannot span tables.** Atoti builds each from one table's
   columns, which splits calendar time in two: the date levels belong to the
   calendar dimension, the hour to the fact row. They are exposed as `Calendar`

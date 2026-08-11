@@ -1,12 +1,20 @@
 package dev.thompgt.transit.stream.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import java.time.Instant;
 import java.time.LocalDate;
 
 /**
  * One vehicle arrival at one stop — the unit the Rust ingest publishes and
  * everything downstream aggregates over.
+ *
+ * <p>The wire form is <strong>snake_case</strong>, matching the Parquet column
+ * vocabulary rather than the Java component names, so one name means one thing
+ * across the project. {@code contracts/stop_event.json} is the golden fixture
+ * both sides are tested against; see {@code contracts/README.md}.
  *
  * <p>{@code routeKey} and {@code stopKey} are the namespaced surrogates
  * ({@code MTA_LIRR:1}), not the raw GTFS ids. Route ids collide across the
@@ -42,6 +50,7 @@ import java.time.LocalDate;
  * @param vehicleId      nullable — not every feed reports one
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record StopEvent(
         String eventId,
         LocalDate serviceDate,
@@ -58,7 +67,10 @@ public record StopEvent(
         Integer delaySeconds,
         Integer dwellSeconds,
         Integer headwaySeconds,
-        boolean cancelled,
+        // The one component whose snake_case form is not just its own name: the
+        // Parquet column is is_cancelled, and the wire follows the Parquet
+        // vocabulary rather than the Java one.
+        @JsonProperty("is_cancelled") boolean cancelled,
         String vehicleId) {
 
     /**

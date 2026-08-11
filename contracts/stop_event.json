@@ -1,0 +1,21 @@
+{
+  "event_id": "9f2c1ab4e7d05386",
+  "service_date": "2026-07-26",
+  "agency_id": "MTA_LIRR",
+  "route_id": "1",
+  "route_key": "MTA_LIRR:1",
+  "trip_id": "GO201_26_2",
+  "stop_id": "102",
+  "stop_key": "MTA_LIRR:102",
+  "stop_sequence": 1,
+  "direction_id": 0,
+  "scheduled_arrival": "2026-07-26T05:05:00Z",
+  "scheduled_departure": "2026-07-26T05:05:30Z",
+  "dwell_seconds": 30,
+  "crosses_midnight": false,
+  "actual_arrival": "2026-07-26T05:07:00Z",
+  "delay_seconds": 120,
+  "headway_seconds": 600,
+  "is_cancelled": false,
+  "vehicle_id": "veh-7"
+}
