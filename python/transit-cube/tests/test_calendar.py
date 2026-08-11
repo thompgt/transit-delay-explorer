@@ -3,10 +3,13 @@ import datetime as dt
 import pytest
 
 from transit_cube.calendar import (
+    US_HOLIDAYS,
     DayType,
     ServicePeriod,
+    UncoveredYearError,
     classify_day_type,
     classify_service_period,
+    holidays_for,
     service_date_for,
 )
 
@@ -32,6 +35,37 @@ class TestDayType:
     def test_holiday_set_is_injectable(self):
         day = dt.date(2026, 7, 22)
         assert classify_day_type(day, holidays=frozenset({day})) is DayType.HOLIDAY
+
+    def test_the_holiday_set_follows_the_dates_year(self):
+        """Christmas is Christmas in every covered year.
+
+        The set used to be a flat 2026 default argument, so a 2027 dataset
+        matched nothing at all: Christmas came back Weekday, the Day Type
+        hierarchy looked complete, and every holiday comparison was wrong with
+        nothing on screen to suggest it.
+        """
+        assert classify_day_type(dt.date(2027, 12, 25)) is DayType.HOLIDAY
+        assert classify_day_type(dt.date(2027, 11, 25)) is DayType.HOLIDAY
+
+    def test_an_uncovered_year_raises_rather_than_reporting_a_weekday(self):
+        uncovered = max(US_HOLIDAYS) + 50
+        with pytest.raises(UncoveredYearError, match=str(uncovered)):
+            classify_day_type(dt.date(uncovered, 12, 25))
+
+
+class TestHolidayCalendars:
+    def test_every_year_holds_only_its_own_dates(self):
+        for year, holidays in US_HOLIDAYS.items():
+            assert holidays, f"{year} is empty"
+            assert all(day.year == year for day in holidays), f"{year} holds a foreign date"
+
+    def test_holidays_for_returns_the_keyed_set(self):
+        for year, holidays in US_HOLIDAYS.items():
+            assert holidays_for(year) is holidays
+
+    def test_holidays_for_names_the_covered_years(self):
+        with pytest.raises(UncoveredYearError, match="1999"):
+            holidays_for(1999)
 
 
 class TestServicePeriod:

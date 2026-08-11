@@ -244,8 +244,10 @@ this early: an awkward hierarchy costs an edit now and a rewrite later.
 
 *Classification models* (`transit_cube.calendar`) are deliberately rule-based
 pure functions rather than learned: `classify_day_type` (holiday wins over
-weekend, from a published federal-holiday set — the holiday schedule is an
-operational decision an agency publishes, not something derivable), and
+weekend, from a published holiday set keyed by year — the holiday schedule is an
+operational decision an agency publishes, not something derivable, so a year
+nobody has entered raises `UncoveredYearError` rather than reporting its
+Christmas as a weekday), and
 `classify_service_period` over half-open agency-local hour bounds, accepting
 GTFS hours `0..47`. *Statistical models* enter with the streaming layer:
 t-digest sketches for bounded-memory delay percentiles, and anomaly detection

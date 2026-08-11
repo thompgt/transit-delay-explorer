@@ -26,7 +26,6 @@ import pyarrow as pa
 import pyarrow.dataset as pads
 
 from transit_cube.calendar import (
-    US_HOLIDAYS_2026,
     DayType,
     ServicePeriod,
     classify_day_type,
@@ -119,7 +118,7 @@ def load_stops(root: Path | None = None) -> pd.DataFrame:
 
 def build_calendar(
     service_dates: list[dt.date] | pd.Series,
-    holidays: frozenset[dt.date] = US_HOLIDAYS_2026,
+    holidays: frozenset[dt.date] | None = None,
 ) -> pd.DataFrame:
     """Build the calendar dimension from the dates present in the facts.
 
@@ -127,12 +126,21 @@ def build_calendar(
     so the dimension can never disagree with the fact table about which days
     exist — a mismatch there shows up as a hierarchy level with members that
     select nothing.
+
+    `holidays` defaults to each date's own year, so a dataset spanning a New
+    Year gets both years' holidays and a dataset in a year nobody has entered
+    raises. It used to default to a flat 2026 set, which meant a 2027 dataset
+    reported Christmas as a weekday and looked entirely healthy doing it.
+
+    :raises UncoveredYearError: for a year with no holiday calendar.
     """
     unique = sorted({_as_date(value) for value in service_dates})
     if not unique:
         raise DatasetError("no service dates to build a calendar from")
 
     frame = pd.DataFrame({"service_date": unique})
+    # Passing holidays=None per date is what lets a window spanning New Year
+    # pick up both years rather than one of them.
     day_types = [classify_day_type(date, holidays) for date in unique]
 
     frame["day_type"] = [str(day_type) for day_type in day_types]
