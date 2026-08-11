@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Timelike, Utc};
 use chrono_tz::Tz;
 use tracing::{debug, warn};
 
@@ -60,6 +60,18 @@ pub struct ScheduledEvent {
     /// because it is the single most useful thing to filter on when a
     /// downstream count looks wrong.
     pub crosses_midnight: bool,
+    /// Hour of `scheduled_arrival` in the agency's own timezone, 0..23.
+    ///
+    /// Written here rather than derived at load time. The cube slices on it,
+    /// the facts are UTC, and a UTC hour would put a New York rush-hour train
+    /// in the middle of the night — so somebody has to convert. Doing it once
+    /// per row at write time, from the local instant that resolution already
+    /// produced, is strictly better than doing it per row per load from a
+    /// timestamp that has to be converted back.
+    pub local_hour: i32,
+    /// The service period `local_hour` falls in — see
+    /// `contracts/service_periods.json`.
+    pub service_period: &'static str,
 }
 
 /// What resolving a date did, for logging and for the `inspect` output.
@@ -199,6 +211,13 @@ impl<'a> Schedule<'a> {
                         stats.crossing_midnight += 1;
                     }
 
+                    // Resolved once, in local time, and only then converted.
+                    // The agency-local hour is a property of this instant that
+                    // is free here and expensive to recover downstream.
+                    let local_arrival = arrival.resolve(service_date, self.tz)?;
+                    let local_departure = departure.resolve(service_date, self.tz)?;
+                    let local_hour = local_arrival.hour() as i32;
+
                     events.push(ScheduledEvent {
                         event_id: event_id(
                             &self.agency.id,
@@ -218,18 +237,16 @@ impl<'a> Schedule<'a> {
                         // absent rather than defaulted to 0, which would assert
                         // a direction the feed did not state.
                         direction_id: trip.direction_id,
-                        scheduled_arrival: arrival
-                            .resolve(service_date, self.tz)?
-                            .with_timezone(&Utc),
-                        scheduled_departure: departure
-                            .resolve(service_date, self.tz)?
-                            .with_timezone(&Utc),
+                        scheduled_arrival: local_arrival.with_timezone(&Utc),
+                        scheduled_departure: local_departure.with_timezone(&Utc),
                         // Negative would mean a vehicle departs before it
                         // arrives. Clamped rather than rejected: it appears in
                         // real feeds as a data-entry slip and is not worth
                         // failing an entire day's ingest over.
                         dwell_seconds: (departure.seconds() - arrival.seconds()).max(0),
                         crosses_midnight,
+                        local_hour,
+                        service_period: service_period(local_hour),
                     });
                 }
             }
@@ -260,6 +277,35 @@ impl<'a> Schedule<'a> {
 
         Ok((events, stats))
     }
+}
+
+/// Half-open `[start, end)` agency-local hour bounds. Overnight is the
+/// wrap-around remainder and is not encoded here.
+const PERIOD_BOUNDS: [(i32, i32, &str); 4] = [
+    (6, 10, "AM Peak"),
+    (10, 16, "Midday"),
+    (16, 20, "PM Peak"),
+    (20, 24, "Evening"),
+];
+
+/// The service period an agency-local hour falls in.
+///
+/// The same rule as `transit_cube.calendar.classify_service_period`, and that
+/// duplication is deliberate but not unchecked: writing the column here is what
+/// lets the cube read it off the partition instead of computing it over
+/// millions of rows at load, and both implementations are tested against
+/// `contracts/service_periods.json` so a moved boundary cannot land in one
+/// language only.
+///
+/// Hours outside 0..23 fall through to Overnight rather than panicking; the
+/// caller takes this from a resolved local instant, which cannot produce one.
+pub fn service_period(local_hour: i32) -> &'static str {
+    for (start, end, period) in PERIOD_BOUNDS {
+        if start <= local_hour && local_hour < end {
+            return period;
+        }
+    }
+    "Overnight"
 }
 
 /// A stable identifier for one scheduled call.
@@ -529,6 +575,45 @@ mod tests {
         assert_eq!(events.len(), 1, "the sound row still resolves");
         assert_eq!(stats.malformed_times, 1);
         assert_eq!(stats.untimed_stop_times, 0, "malformed is not untimed");
+    }
+
+    /// The other half of `contracts/service_periods.json`.
+    ///
+    /// The Python classifier is tested against the same file. Two
+    /// implementations of one rule is how a dashboard ends up disagreeing with
+    /// itself, so neither is the authority — the table is.
+    #[test]
+    fn service_periods_match_the_shared_contract() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../contracts/service_periods.json");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{} is the shared contract: {e}", path.display()));
+        let expected: std::collections::BTreeMap<String, String> =
+            serde_json::from_str(&text).unwrap();
+
+        assert_eq!(expected.len(), 24, "every hour of the day must be stated");
+        for (hour, period) in &expected {
+            let hour: i32 = hour.parse().unwrap();
+            assert_eq!(service_period(hour), period, "hour {hour}");
+        }
+    }
+
+    #[test]
+    fn the_local_hour_is_the_agency_hour_not_the_utc_one() {
+        // 06:00 in New York is 10:00 UTC. Slicing the cube on the UTC hour
+        // would file a morning rush-hour train under the middle of the night,
+        // which is the whole reason this column is written at all.
+        let feed = feed();
+        let agency = agency();
+        let schedule = Schedule::index(&feed, &agency).unwrap();
+
+        let (events, _) = schedule.for_date(date(2026, 4, 1)).unwrap();
+        for event in &events {
+            let utc_hour = event.scheduled_arrival.hour() as i32;
+            assert_ne!(event.local_hour, utc_hour, "EDT is four hours off UTC");
+            assert_eq!(event.local_hour, (utc_hour + 20) % 24);
+            assert_eq!(event.service_period, service_period(event.local_hour));
+        }
     }
 
     #[test]

@@ -34,7 +34,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import atoti as tt
-import pandas as pd
 
 from transit_cube.dataset import (
     build_calendar,
@@ -91,11 +90,17 @@ def load_tables(
 ) -> CubeTables:
     """Read the Parquet dataset into session tables and join them.
 
-    Loaded through pandas rather than `session.read_parquet` because the fact
-    table needs the two derived agency-local columns — `local_hour` and
-    `service_period` — which do not exist in the Parquet and cannot be computed
-    from a UTC timestamp without knowing each row's agency timezone. See
-    `transit_cube.dataset`.
+    Loaded through pandas rather than `session.read_parquet` for one remaining
+    reason: `service_date` is the partition key and lives in the directory name
+    only, and Atoti's reader does not recover a Hive partition value from a
+    path. pyarrow does, given the partitioning schema, which is why the hop
+    exists. Writing `service_date` into the files as well is not an option —
+    see `dataset/facts.rs` for the type conflict that causes.
+
+    What the hop no longer does is *compute* anything. `local_hour`,
+    `service_period` and `overnight` are read from the Parquet, so the fact
+    frame goes to the server exactly as it came off disk rather than being
+    rebuilt column by column first.
     """
     events_frame = load_scheduled_events(root, dates=dates)
     routes_frame = load_routes(root)
@@ -103,7 +108,7 @@ def load_tables(
     calendar_frame = build_calendar(events_frame["service_date"])
 
     events = session.read_pandas(
-        _facts_for_atoti(events_frame),
+        events_frame,
         table_name=FACT_TABLE,
         # No key. Facts are append-only and `event_id` is a hash of the natural
         # key, so declaring it a key would buy uniqueness enforcement at the
@@ -146,41 +151,6 @@ def load_tables(
     events.join(calendar, events["service_date"] == calendar["service_date"])
 
     return CubeTables(events=events, routes=routes, stops=stops, calendar=calendar)
-
-
-def _facts_for_atoti(frame: pd.DataFrame) -> pd.DataFrame:
-    """The fact frame, adapted to what the server can hold and aggregate.
-
-    Beyond the dtype widening, this adds an integer `overnight` alongside the
-    boolean `crosses_midnight`. Summing the boolean directly would be the
-    obvious way to count cross-midnight calls, but Atoti compiles a sum to Java
-    and its ternary rejects a boolean constant outright, so the flag is carried
-    as the 0/1 the aggregation actually wants. `crosses_midnight` stays, since
-    it is the column anyone reading the Parquet expects to find.
-    """
-    facts = _widen_for_atoti(frame)
-    facts["overnight"] = frame["crosses_midnight"].astype("int32")
-    return facts
-
-
-def _widen_for_atoti(frame: pd.DataFrame) -> pd.DataFrame:
-    """Widen dtypes Atoti's type system has no equivalent for.
-
-    Atoti's scalar types stop at 32-bit integers and it has no categorical
-    type, so the two compact dtypes `transit_cube.dataset` chooses — `int16`
-    for the local hour and `category` for the service period — are rejected
-    outright with `Field ... has unsupported DataType`, which does not name the
-    dtype that caused it. Those choices are right for pandas and the widening
-    costs a few megabytes on a million rows, so it happens here at the seam
-    rather than by making the loader worse for its other callers.
-    """
-    widened = frame.copy(deep=False)
-    for column, dtype in frame.dtypes.items():
-        if isinstance(dtype, pd.CategoricalDtype):
-            widened[column] = frame[column].astype("string")
-        elif pd.api.types.is_integer_dtype(dtype) and dtype.itemsize < 4:
-            widened[column] = frame[column].astype("int32")
-    return widened
 
 
 def build_cube(session: tt.Session, tables: CubeTables) -> tt.Cube:

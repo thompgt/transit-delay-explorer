@@ -1,4 +1,6 @@
 import datetime as dt
+import json
+from pathlib import Path
 
 import pytest
 
@@ -66,6 +68,31 @@ class TestHolidayCalendars:
     def test_holidays_for_names_the_covered_years(self):
         with pytest.raises(UncoveredYearError, match="1999"):
             holidays_for(1999)
+
+
+#: The shared table both implementations of the rule are tested against.
+SERVICE_PERIODS = Path(__file__).resolve().parents[3] / "contracts" / "service_periods.json"
+
+
+class TestTheServicePeriodContract:
+    """The rule has two implementations, so neither of them is the authority.
+
+    The Rust ingest stamps `service_period` onto every fact row at write time so
+    the cube does not have to compute it over millions of rows on every load;
+    this classifier stays because it is the readable statement of the rule.
+    Both are checked against `contracts/service_periods.json`, and the Rust
+    half of this pair lives in `schedule.rs`.
+    """
+
+    def test_the_contract_is_checked_in(self):
+        assert SERVICE_PERIODS.is_file(), f"{SERVICE_PERIODS} is missing"
+
+    def test_the_classifier_matches_it_for_every_hour(self):
+        expected = json.loads(SERVICE_PERIODS.read_text())
+
+        assert len(expected) == 24, "every hour of the day must be stated"
+        for hour, period in expected.items():
+            assert str(classify_service_period(int(hour))) == period, f"hour {hour}"
 
 
 class TestServicePeriod:

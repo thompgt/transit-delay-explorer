@@ -21,6 +21,9 @@ One row per vehicle arrival at a stop. Partitioned by `service_date`.
 | `delay_seconds` | int | Negative means early |
 | `dwell_seconds` | int | Departure minus arrival |
 | `headway_seconds` | int | Gap since previous vehicle on this route/stop/direction |
+| `local_hour` | int | Hour of `scheduled_arrival` in the agency's own timezone. Written by the ingest, which holds the local instant; deriving it per load rebuilt the whole fact table in pandas |
+| `service_period` | string | AM Peak / Midday / PM Peak / Evening / Overnight, from `local_hour`. The rule is pinned by `contracts/service_periods.json` and tested from both languages |
+| `overnight` | int | The 0/1 form of `crosses_midnight`. Atoti compiles a sum to Java and its ternary rejects a boolean constant |
 | `is_cancelled` | bool | |
 | `schedule_relationship` | string | Nullable — the GTFS-RT spec name: `SCHEDULED`, `ADDED`, `UNSCHEDULED`, `CANCELED`, `DUPLICATED`, `DELETED`, `SKIPPED`, `NO_DATA`. Only `SCHEDULED` yields a usable delay: an `ADDED` trip has no static schedule to be late against, and `is_cancelled` alone cannot say so |
 | `vehicle_id` | string | Nullable |

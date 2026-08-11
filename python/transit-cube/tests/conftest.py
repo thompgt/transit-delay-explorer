@@ -56,6 +56,16 @@ def fact_batch(rows: list[dict]) -> pa.Table:
             "crosses_midnight": pa.array(
                 [r.get("crosses_midnight", False) for r in rows], pa.bool_()
             ),
+            # Derived by the ingest, not by the loader — see
+            # rust/transit-ingest/src/schedule.rs. Spelled out per row here
+            # rather than computed, so the fixture states what the writer is
+            # expected to produce instead of re-deriving it with the same rule
+            # the code under test uses.
+            "local_hour": pa.array([r["local_hour"] for r in rows], pa.int32()),
+            "service_period": pa.array([r["service_period"] for r in rows], pa.string()),
+            "overnight": pa.array(
+                [int(r.get("crosses_midnight", False)) for r in rows], pa.int32()
+            ),
             "actual_arrival": pa.nulls(len(rows), pa.timestamp("us", tz="UTC")),
             "delay_seconds": pa.nulls(len(rows), pa.int32()),
             "headway_seconds": pa.nulls(len(rows), pa.int32()),
@@ -75,6 +85,8 @@ def write_dataset(root: Path) -> Path:
                 "event_id": "a",
                 "agency_id": "MTA_NYCT",
                 "arrival": dt.datetime(2026, 5, 26, 10, 0, tzinfo=dt.UTC),
+                "local_hour": 6,
+                "service_period": "AM Peak",
                 "dwell": 30,
             },
             # 05:30 UTC on the 27th = 01:30 EDT on the 27th, but this is the
@@ -83,6 +95,8 @@ def write_dataset(root: Path) -> Path:
                 "event_id": "b",
                 "agency_id": "MTA_NYCT",
                 "arrival": dt.datetime(2026, 5, 27, 5, 30, tzinfo=dt.UTC),
+                "local_hour": 1,
+                "service_period": "Overnight",
                 "crosses_midnight": True,
                 "dwell": 30,
             },
@@ -94,6 +108,8 @@ def write_dataset(root: Path) -> Path:
                 "event_id": "c",
                 "agency_id": "MTA_NYCT",
                 "arrival": dt.datetime(2026, 5, 27, 21, 0, tzinfo=dt.UTC),
+                "local_hour": 17,
+                "service_period": "PM Peak",
                 "trip_id": "T2",
                 "dwell": 60,
             },

@@ -65,6 +65,19 @@ pub fn schema() -> SchemaRef {
         Field::new("scheduled_departure", timestamp(), false),
         Field::new("dwell_seconds", DataType::Int32, false),
         Field::new("crosses_midnight", DataType::Boolean, false),
+        // Agency-local derived columns. Written here rather than derived at
+        // load time: the cube slices on all three, and computing them over a
+        // multi-million-row fact table on every session start meant the whole
+        // table was materialised in pandas and then copied again into Atoti.
+        // They are a property of the row, and the writer already holds the
+        // local instant they come from.
+        Field::new("local_hour", DataType::Int32, false),
+        Field::new("service_period", DataType::Utf8, false),
+        // The 0/1 form of crosses_midnight. Atoti compiles a sum to Java and
+        // its ternary rejects a boolean constant outright, so the flag it
+        // aggregates has to be an integer; crosses_midnight stays because it is
+        // what anyone reading the Parquet expects to find.
+        Field::new("overnight", DataType::Int32, false),
         // Realtime columns: null in Phase 1, populated in Phase 3.
         Field::new("actual_arrival", timestamp(), true),
         Field::new("delay_seconds", DataType::Int32, true),
@@ -132,6 +145,15 @@ pub fn to_record_batch(events: &[ScheduledEvent]) -> Result<RecordBatch> {
         )),
         Arc::new(BooleanArray::from_iter(
             events.iter().map(|e| Some(e.crosses_midnight)),
+        )),
+        Arc::new(Int32Array::from_iter_values(
+            events.iter().map(|e| e.local_hour),
+        )),
+        Arc::new(StringArray::from_iter_values(
+            events.iter().map(|e| e.service_period),
+        )),
+        Arc::new(Int32Array::from_iter_values(
+            events.iter().map(|e| i32::from(e.crosses_midnight)),
         )),
         // By name rather than by position: these are the columns most likely to
         // move when the schema changes, and a positional slip here would write
@@ -233,6 +255,8 @@ mod tests {
             scheduled_departure: instant("2026-04-01T10:00:30Z"),
             dwell_seconds: 30,
             crosses_midnight: false,
+            local_hour: 6,
+            service_period: "AM Peak",
         }
     }
 
@@ -282,6 +306,9 @@ mod tests {
                 "scheduled_departure",
                 "dwell_seconds",
                 "crosses_midnight",
+                "local_hour",
+                "service_period",
+                "overnight",
                 "actual_arrival",
                 "delay_seconds",
                 "headway_seconds",

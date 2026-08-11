@@ -14,6 +14,12 @@ the 26th's service, and the day type that matters is the 26th's. Deriving day
 type from the timestamp instead of the partition would file a Friday-night
 train under Saturday and quietly move a slice of overnight service between two
 answers.
+
+Nothing here derives a fact column any more. `local_hour`, `service_period` and
+`overnight` are written by the ingest, which holds the agency-local instant
+they come from; this module reads them. The calendar dimension is still built
+in Python, because it is derived from the *set of dates present* rather than
+from any one row.
 """
 
 from __future__ import annotations
@@ -29,7 +35,6 @@ from transit_cube.calendar import (
     DayType,
     ServicePeriod,
     classify_day_type,
-    classify_service_period,
 )
 from transit_cube.config import Agency, ConfigError, load_agencies
 
@@ -56,15 +61,35 @@ def parquet_root(start: Path | None = None) -> Path:
     )
 
 
+#: Columns the ingest derives at write time. Checked on load rather than
+#: assumed: a dataset built by an older ingest would otherwise reach the cube
+#: missing the columns two of its hierarchies are built from, and fail somewhere
+#: much less informative.
+DERIVED_COLUMNS = ("local_hour", "service_period", "overnight")
+
+
 def load_scheduled_events(
     root: Path | None = None,
     dates: list[dt.date] | None = None,
     agencies: dict[str, Agency] | None = None,
 ) -> pd.DataFrame:
-    """Load the fact table, with the agency-local columns the cube slices on.
+    """Load the fact table.
 
     `dates` restricts the load to those service dates, pruning at the partition
     level so unrequested days are never opened.
+
+    The agency-local columns — `local_hour`, `service_period`, `overnight` —
+    are read straight from the Parquet. They used to be computed here, per
+    load, with a groupby-and-convert over the whole fact table: a 7-day
+    tri-agency window is millions of rows, and deriving three columns onto them
+    meant the table existed twice in pandas before Atoti copied it a third time.
+    They are properties of a row, so the ingest stamps them on once at write
+    time from the local instant it has already resolved. See
+    `rust/transit-ingest/src/schedule.rs`.
+
+    `agencies` is still validated against, because a fact row from an agency the
+    registry does not define is a real inconsistency worth failing on — it just
+    no longer drives a timezone conversion.
     """
     root = root or parquet_root()
     agencies = agencies if agencies is not None else load_agencies()
@@ -85,8 +110,14 @@ def load_scheduled_events(
     if events.empty:
         raise DatasetError(f"{path} matched no rows")
 
-    events["local_hour"] = _local_hour(events, agencies)
-    events["service_period"] = _service_period(events["local_hour"])
+    missing = [column for column in DERIVED_COLUMNS if column not in events.columns]
+    if missing:
+        raise DatasetError(
+            f"{path} has no {', '.join(missing)} column; it was written by an ingest older "
+            f"than the one that derives them. Rebuild with `transit-ingest build`."
+        )
+
+    _check_agencies(events, agencies)
     return events
 
 
@@ -164,37 +195,18 @@ def _load_dimension(root: Path | None, table: str) -> pd.DataFrame:
     return frame
 
 
-def _local_hour(events: pd.DataFrame, agencies: dict[str, Agency]) -> pd.Series:
-    """The hour of `scheduled_arrival` in each row's own agency timezone.
+def _check_agencies(events: pd.DataFrame, agencies: dict[str, Agency]) -> None:
+    """Every agency in the facts must be one the registry defines.
 
-    Grouped by agency rather than converted wholesale: the three MTA feeds
-    happen to share a timezone, and hard-coding that would make the first
-    agency in another one silently wrong.
+    Over the distinct values rather than the rows: there are three of them and
+    millions of rows. Silently mislabelling every row an unknown agency
+    contributed is worse than refusing to load.
     """
-    pieces: list[pd.Series] = []
-
-    for agency_id, group in events.groupby("agency_id", sort=False):
-        agency = agencies.get(agency_id)
-        if agency is None:
-            raise ConfigError(
-                f"the dataset contains agency {agency_id!r}, which the registry does not define"
-            )
-        pieces.append(group["scheduled_arrival"].dt.tz_convert(agency.tz).dt.hour)
-
-    # Concatenated and reindexed rather than assigned into a preallocated
-    # series: assigning by label upcasts to float on the first write, and a
-    # float hour then fails every integer lookup downstream.
-    return pd.concat(pieces).reindex(events.index).astype("int16")
-
-
-def _service_period(local_hour: pd.Series) -> pd.Series:
-    """Bucket local hours into service periods.
-
-    Through a 24-entry lookup rather than a per-row call: the fact table runs to
-    millions of rows and there are only ever twenty-four answers.
-    """
-    lookup = [str(classify_service_period(hour)) for hour in range(24)]
-    return local_hour.map(lambda hour: lookup[hour]).astype("category")
+    unknown = sorted(set(events["agency_id"].unique()) - set(agencies))
+    if unknown:
+        raise ConfigError(
+            f"the dataset contains agency {unknown[0]!r}, which the registry does not define"
+        )
 
 
 def _as_date(value: object) -> dt.date:
@@ -209,6 +221,7 @@ def _as_date(value: object) -> dt.date:
 
 
 __all__ = [
+    "DERIVED_COLUMNS",
     "FACT_TABLE",
     "PARTITIONING",
     "DatasetError",

@@ -25,3 +25,23 @@ Both sides are tested against this one file, from their own toolchain:
 
 Changing a name here is a breaking change to the topic. Change it in this file
 first; both test suites will then tell you what else has to move.
+
+## `service_periods.json`
+
+The agency-local hour → service period mapping, for all 24 hours.
+
+The rule now has two implementations. The Rust writer stamps `service_period`
+onto every fact row at write time, so the cube can read it off the partition
+instead of computing it over millions of rows at load; the Python classifier
+stays, because it is the readable statement of the rule and the thing tests
+about "what counts as PM peak" should be written against.
+
+Two implementations of one rule is exactly how a dashboard ends up disagreeing
+with itself, so neither is allowed to be the authority. Both are tested against
+this table:
+
+- `rust/transit-ingest/src/schedule.rs` — `service_period` over 0..23.
+- `python/transit-cube/tests/test_calendar.py` — `classify_service_period`.
+
+Moving a boundary means editing this file and watching two suites go red.
+

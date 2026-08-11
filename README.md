@@ -50,7 +50,7 @@ fields, streaming zip extraction, `chrono`/`chrono-tz` for timezone- and
 DST-correct instant resolution, `thiserror` error enums with one variant per
 failure mode, and Arrow `RecordBatch` construction written straight to
 zstd-compressed Parquet via `arrow` + `parquet` 53, and conditional GET with
-persisted cache validators. 143 unit tests in-tree.
+persisted cache validators. 145 unit tests in-tree.
 
 **Java** — Spring Boot 3.3 on Java 21: records as the domain model, Spring Kafka
 consumers, Actuator (health/metrics/Prometheus), virtual threads enabled for the
@@ -62,8 +62,8 @@ percentiles.
 
 **Python** — Atoti Community Edition cube design (manual-mode cube, hierarchies,
 dimension assignment, derived and aggregated measures), `pyarrow.dataset` with
-an explicitly declared Hive partitioning schema, pandas dtype work at the
-Atoti seam, `tomllib` config sharing with the Rust side, `StrEnum` domain types,
+an explicitly declared Hive partitioning schema and partition-level pruning,
+`tomllib` config sharing with the Rust side, `StrEnum` domain types,
 `ruff` lint + format, pytest.
 
 **Data engineering** — dimensional modelling (star schema, composite surrogate
@@ -147,6 +147,8 @@ rust/transit-ingest/     Library + thin CLI (`transit-ingest`)
 contracts/               The wire contract between the two halves.
   stop_event.json          golden `transit.stop_events` message, snake_case,
                            parsed by BOTH the Rust and the Java test suites.
+  service_periods.json     the hour -> service period table, asserted against
+                           by BOTH the Rust and the Python implementations.
 
 java/transit-stream/     Spring Boot 3.3 / Java 21
   .../TransitStreamApplication.java   entrypoint (scheduling enabled)
@@ -180,7 +182,7 @@ docs/                    DATA_MODEL.md, FEED_NOTES.md, WORKPLAN.md
 | --- | --- | --- |
 | Ingest | Rust | Millions of `stop_times` rows per feed, parsed and resolved to absolute UTC instants. The work is CPU- and IO-bound with no runtime to warm up, `arrow`/`parquet` are first-class, and the type system does real work here: GTFS's optional fields become `Option<T>` so an absent `route_short_name` cannot be mistaken for an empty one. |
 | Streaming | Java | The Kafka ecosystem's centre of gravity, and Java 21's virtual threads fit an SSE endpoint that holds a thread per subscriber for the life of the subscription. Sketch libraries (t-digest) for streaming percentiles are mature here. |
-| Cube | Python | Atoti's API *is* Python. pandas/pyarrow also make the Parquet seam trivial, which matters because the fact table needs two agency-local columns derived at load time that cannot exist in the file. |
+| Cube | Python | Atoti's API *is* Python. pandas/pyarrow also make the Parquet seam trivial, which still matters: `service_date` is the partition key and lives in the directory name only, and pyarrow recovers it from the path where Atoti's own reader does not. |
 
 ### Models
 
@@ -199,6 +201,9 @@ partitioned by `service_date`:
 | `scheduled_arrival`, `scheduled_departure` | timestamp(µs, UTC) | |
 | `dwell_seconds` | int32 | |
 | `crosses_midnight` | bool | GTFS time was ≥ `24:00:00` |
+| `local_hour` | int32 | hour of `scheduled_arrival` in the agency's own timezone |
+| `service_period` | utf8 | AM Peak / Midday / PM Peak / Evening / Overnight, from `local_hour` |
+| `overnight` | int32 | the 0/1 form of `crosses_midnight`; Atoti's sum compiles to Java and will not take a boolean |
 | `actual_arrival`, `delay_seconds`, `headway_seconds`, `is_cancelled`, `schedule_relationship`, `vehicle_id` | nullable | realtime columns — **typed nulls today**, filled in Phase 3 |
 
 `schedule_relationship` carries the GTFS-RT spec name rather than being folded
@@ -358,12 +363,18 @@ rather than chosen:
 
 6. **Load** (`transit_cube.dataset`). `pyarrow.dataset` with the partitioning
    schema declared explicitly, pruning at the partition level when
-   `TDE_CUBE_DATES` restricts the load. Two columns are derived here because
-   they cannot exist in the file: `local_hour` (facts are UTC; slicing on the
-   UTC hour would put a New York rush-hour train in the middle of the night) and
-   `service_period`, both per-agency-timezone. Day type comes from the
-   *partition* date, not the timestamp — a 25:30 train arrives at 01:30 the next
-   morning but belongs to the previous day's service.
+   `TDE_CUBE_DATES` restricts the load. It derives nothing: `local_hour`,
+   `service_period` and `overnight` are stamped on by the ingest, which already
+   holds the agency-local instant they come from. Deriving them per load meant
+   rebuilding a multi-million-row fact table in pandas before Atoti copied it
+   again — three materialisations of the same rows to add three columns that
+   never change. `service_period`'s rule now has two implementations, so
+   neither is the authority: both are tested against
+   [`contracts/service_periods.json`](contracts/README.md). Day type still
+   comes from the *partition* date rather than the timestamp — a 25:30 train
+   arrives at 01:30 the next morning but belongs to the previous day's service
+   — and is built in Python because it is a property of the set of dates
+   present, not of any one row.
 
 7. **Cube** (`transit_cube.cube`). Four session tables joined on the namespaced
    keys, hierarchies and measures defined, served by

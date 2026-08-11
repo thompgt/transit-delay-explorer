@@ -64,7 +64,12 @@ def test_a_filter_matching_nothing_is_an_error(dataset: Path) -> None:
 
 def test_local_hour_is_agency_local_not_utc(dataset: Path) -> None:
     """10:00 UTC is 06:00 in New York; slicing on the UTC hour would put a
-    morning rush-hour train in the middle of the night."""
+    morning rush-hour train in the middle of the night.
+
+    The ingest writes this column; the loader reads it. It used to be derived
+    here on every load, which meant the whole fact table was rebuilt in pandas
+    before Atoti copied it again.
+    """
     events = load_scheduled_events(dataset, agencies=AGENCIES).set_index("event_id")
 
     assert events.loc["a", "local_hour"] == 6
@@ -76,6 +81,25 @@ def test_service_periods_come_from_the_local_hour(dataset: Path) -> None:
 
     assert events.loc["a", "service_period"] == str(ServicePeriod.AM_PEAK)
     assert events.loc["c", "service_period"] == str(ServicePeriod.PM_PEAK)
+
+
+def test_a_dataset_without_the_derived_columns_names_them(tmp_path: Path) -> None:
+    """An older ingest's output must fail here, not four hierarchies later."""
+    root = tmp_path / "data" / "parquet"
+    partition = root / "scheduled_events" / f"service_date={TUESDAY}"
+    partition.mkdir(parents=True)
+    pq.write_table(
+        pa.table(
+            {
+                "event_id": pa.array(["a"], pa.string()),
+                "agency_id": pa.array(["MTA_NYCT"], pa.string()),
+            }
+        ),
+        partition / "MTA_NYCT.parquet",
+    )
+
+    with pytest.raises(DatasetError, match="local_hour"):
+        load_scheduled_events(root, agencies=AGENCIES)
 
 
 def test_an_overnight_call_keeps_its_service_date(dataset: Path) -> None:
