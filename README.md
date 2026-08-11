@@ -49,7 +49,8 @@ parsing with `csv` + `serde` and `Option<T>` for GTFS's genuinely optional
 fields, streaming zip extraction, `chrono`/`chrono-tz` for timezone- and
 DST-correct instant resolution, `thiserror` error enums with one variant per
 failure mode, and Arrow `RecordBatch` construction written straight to
-zstd-compressed Parquet via `arrow` + `parquet` 53. 138 unit tests in-tree.
+zstd-compressed Parquet via `arrow` + `parquet` 53, and conditional GET with
+persisted cache validators. 143 unit tests in-tree.
 
 **Java** — Spring Boot 3.3 on Java 21: records as the domain model, Spring Kafka
 consumers, Actuator (health/metrics/Prometheus), virtual threads enabled for the
@@ -298,7 +299,13 @@ rather than chosen:
 
 2. **Fetch** (`transit-ingest fetch`). Downloads each static archive to
    `data/raw/<agency>.zip`, keeping one it already has — the static feeds change
-   a few times a year — unless `--force`. A download is validated as a zip
+   a few times a year — unless `--force`. `--force` does not mean "download it
+   again regardless": the `ETag` and `Last-Modified` from the last download are
+   kept in `<agency>.zip.cache.json` beside the archive and sent back as
+   `If-None-Match` / `If-Modified-Since`, so an unchanged feed costs one round
+   trip and a 304 rather than tens of megabytes across three agencies. A lost or
+   corrupt sidecar degrades to an unconditional request, never to a missed
+   update. A download is validated as a zip
    holding the required GTFS files *before* it replaces anything on disk: the
    MTA serves an HTML error page with a 200 status when a feed is briefly down,
    and letting that land as `MTA_NYCT.zip` turns a network blip into a parse
@@ -406,7 +413,8 @@ cargo run --bin transit-ingest -- inspect MTA_NYCT           # contents + integr
 `build` takes an optional agency id, `--from` / `--to` for an explicit window,
 or `--days N` for N days from the start of the window; with none of them it
 writes the whole window every selected agency covers. Plus `--archive <path>`
-and `--allow-violations`. `fetch` takes `--force`. `inspect` exits non-zero on
+and `--allow-violations`. `fetch` takes `--force`, which revalidates against the
+server rather than blindly re-downloading. `inspect` exits non-zero on
 integrity violations, so it is usable as a gate.
 
 ### 3. Serve the cube
