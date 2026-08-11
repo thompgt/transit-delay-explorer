@@ -12,8 +12,17 @@ concurrency:
 
 jobs:
   rust:
-    name: rust / transit-ingest
-    runs-on: ubuntu-latest
+    # The ingest has genuinely platform-specific code -- fetch::install deletes
+    # before renaming because Windows will not rename onto an existing file --
+    # and the dev machine is Windows while CI was Linux only. That is exactly
+    # backwards: the branch that exists for one platform was the branch no
+    # machine but the author's ever ran.
+    name: rust / transit-ingest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     defaults:
       run:
         working-directory: rust
@@ -25,8 +34,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      # Formatting and lint are platform-independent; running them twice would
+      # only double the ways one job can be red for one reason.
+      - if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --all -- --check
+      - if: matrix.os == 'ubuntu-latest'
+        run: cargo clippy --all-targets --all-features -- -D warnings
       # Tests load the checked-in config/agencies.toml, so a typo there fails
       # here rather than midway through a run.
       - run: cargo test --all-features

@@ -69,8 +69,9 @@ Phase 5 data swap needs no cube rework.
 
 **Platform** — Docker Compose with healthchecks, service profiles, and a
 one-shot idempotent topic initializer; Redpanda as a Kafka-wire-compatible
-broker; a four-job GitHub Actions matrix (Rust fmt/clippy/test, Maven verify,
-ruff + pytest, and a real broker produce/consume round trip).
+broker; a four-job GitHub Actions matrix (Rust fmt/clippy/test on both Linux and
+Windows, since the ingest has a Windows-only rename branch; Maven verify; ruff +
+pytest; and a real broker produce/consume round trip).
 
 ## Architecture
 
