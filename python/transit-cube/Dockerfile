@@ -5,10 +5,15 @@
 # has. Pinning 3.11 here means the cube runs the same way everywhere without
 # anyone managing a second interpreter by hand.
 #
-# Dependencies are installed by name rather than with `pip install -e .` so the
-# layer caches independently of the source. Atoti pulls a bundled JVM and is
-# several hundred megabytes; rebuilding it on every source edit would make the
+# Dependencies come from pyproject.toml but the project itself is not installed,
+# so the layer caches independently of the source. Atoti pulls a bundled JVM and
+# is several hundred megabytes; rebuilding it on every source edit would make the
 # edit-run loop unusable. Source is mounted at run time instead.
+#
+# The versions used to be re-listed here by hand, with a comment admitting they
+# mirrored pyproject.toml. They drifted from CI's own hand-copied list, and
+# nothing would have said so. Now there is one list, read out of pyproject.toml
+# at build time.
 
 FROM python:3.11-slim
 
@@ -22,15 +27,18 @@ ENV HOME=/tmp \
 
 WORKDIR /app
 
-# Versions mirror python/transit-cube/pyproject.toml. Kept in step by the
-# smoke test, which imports the package and would fail on a mismatch.
-RUN pip install --no-cache-dir \
-        "atoti>=0.9,<0.10" \
-        "atoti-jupyterlab>=0.9,<0.10" \
-        "pandas>=2.2" \
-        "pyarrow>=17" \
-        "pytest>=8" \
-        "ruff>=0.6"
+# Only the manifest is copied, so editing the cube does not invalidate the
+# Atoti layer. `dev` comes along because this image is also what runs the cube
+# tests -- it is the only environment in which the Atoti ones are not skipped.
+COPY pyproject.toml /tmp/pyproject.toml
+
+RUN python -c "\
+import tomllib; \
+p = tomllib.load(open('/tmp/pyproject.toml','rb'))['project']; \
+deps = p['dependencies'] + p.get('optional-dependencies', {}).get('dev', []); \
+open('/tmp/requirements.txt','w').write('\n'.join(deps) + '\n')" \
+    && cat /tmp/requirements.txt \
+    && pip install --no-cache-dir -r /tmp/requirements.txt
 
 # The dashboard. Atoti serves the whole UI from this one port, and binds every
 # interface, so publishing it is all that is needed to reach it from the host.

@@ -71,12 +71,17 @@ jobs:
         with:
           # Atoti Community Edition does not support 3.13.
           python-version: '3.11'
-      # The calendar and Parquet-loader tests need no Atoti session, so CI
-      # installs pandas and pyarrow but not the JVM-backed Atoti distribution;
-      # tests/test_cube.py skips itself where Atoti is absent and is covered by
-      # the container run instead. The loader tests write their own fixture
-      # dataset, so no ingest run is required either.
-      - run: pip install pytest ruff pandas pyarrow
+      # From pyproject.toml, not from a hand-typed list. CI used to install
+      # unpinned pandas and pyarrow while the Dockerfile re-listed its own
+      # versions beside a comment admitting they mirrored pyproject -- three
+      # copies of one dependency set, any two of which could drift without
+      # anything noticing.
+      #
+      # This pulls Atoti and its bundled JVM, which is slow, and that is the
+      # point: it is what makes tests/test_cube.py actually run here rather
+      # than skip itself. The loader tests write their own fixture dataset, so
+      # no ingest run is required.
+      - run: pip install -e ".[dev]"
       - run: ruff check src tests
       - run: ruff format --check src tests
       - run: python -m pytest -q

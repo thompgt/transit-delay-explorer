@@ -452,10 +452,10 @@ docker build -t tde-cube:latest python/transit-cube
 docker run --rm -v "$PWD:/app:ro" -w /app/python/transit-cube tde-cube:latest pytest
 ```
 
-`tests/test_cube.py` skips itself where Atoti is absent, so CI runs the calendar,
-config and loader tests on a plain pandas/pyarrow install and covers the cube in
-the container instead. The loader tests write their own fixture dataset, so no
-ingest run is required.
+`tests/test_cube.py` skips itself where Atoti is absent, which is why CI
+installs the real `[dev]` extra from `pyproject.toml` rather than a hand-typed
+subset — that one list is also what the image installs, so the two cannot drift.
+The loader tests write their own fixture dataset, so no ingest run is required.
 
 ## Status
 
