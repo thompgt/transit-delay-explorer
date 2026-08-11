@@ -21,20 +21,32 @@ pub struct Config {
     pub agencies: Vec<Agency>,
 }
 
+/// Registry-wide defaults.
+///
+/// Only `request_timeout_seconds` has a consumer today. The other three
+/// describe the realtime poller, which is Phase 3 — they are **declared,
+/// unused**, and each is marked as such below. The tests over them assert that
+/// the checked-in TOML parses into the values it states, which is worth having,
+/// but it is not coverage of any behaviour: nothing yet polls on an interval or
+/// decides a feed is stale.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Defaults {
-    /// MTA regenerates roughly every 30s; polling faster just re-fetches
-    /// identical payloads.
+    /// **Declared, unused until Phase 3.** MTA regenerates roughly every 30s;
+    /// polling faster just re-fetches identical payloads.
     #[serde(default = "d_poll")]
     pub poll_interval_seconds: u64,
-    /// A feed whose header timestamp is older than this is stale: it raises a
-    /// health event rather than silently producing old data as if it were new.
+    /// **Declared, unused until Phase 3.** A feed whose header timestamp is
+    /// older than this is stale: it should raise a health event rather than
+    /// silently producing old data as if it were new.
     #[serde(default = "d_stale")]
     pub stale_after_seconds: u64,
+    /// The one default with a consumer today: the static-archive download in
+    /// `fetch::static_archive`.
     #[serde(default = "d_timeout")]
     pub request_timeout_seconds: u64,
-    /// Threshold for the default on-time-performance measure.
+    /// **Declared, unused until Phase 5.** Threshold for the default
+    /// on-time-performance measure, which needs realtime arrivals to exist.
     #[serde(default = "d_on_time")]
     pub on_time_threshold_seconds: i64,
 }
@@ -92,18 +104,29 @@ pub struct RealtimeFeed {
 
 /// Per-agency deviations from the spec. Every one of these is a real MTA
 /// behaviour documented in `docs/FEED_NOTES.md`.
+///
+/// **Every field here is declared and unused until Phase 3.** Both describe how
+/// a *realtime* id is reconciled with the static schedule, and nothing reads a
+/// realtime feed yet. They are kept because they are findings — reading them
+/// out of the real feeds is what cost the time — but the tests over them assert
+/// that the TOML says what it says, not that any parser honours it. A green
+/// suite here is not evidence that the feed quirks are handled.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Quirks {
+    /// **Declared, unused until Phase 3.**
     #[serde(default)]
     pub trip_id_match: TripIdMatch,
-    /// NYCT appends a direction letter to the parent stop id (`101` -> `101N`,
-    /// `101S`). True for the subway, false for the railroads.
+    /// **Declared, unused until Phase 3.** NYCT appends a direction letter to
+    /// the parent stop id (`101` -> `101N`, `101S`). True for the subway, false
+    /// for the railroads.
     #[serde(default)]
     pub stop_id_direction_suffix: bool,
 }
 
 /// How a realtime `trip_id` is matched back to the static schedule.
+///
+/// **Declared, unused until Phase 3.**
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TripIdMatch {

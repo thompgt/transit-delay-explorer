@@ -3,16 +3,25 @@
 # Every field the ingest needs is here: where the static archive lives, which
 # realtime feeds to poll, the agency-local timezone used to resolve service
 # dates, and the quirks that agency's feed exhibits.
+#
+# Anything marked DECLARED, UNUSED below is recorded but not yet honoured by any
+# code: it describes the realtime path, which is Phase 3. The tests over these
+# check that this file parses into the values it states -- not that a parser
+# obeys them. Changing one of them today changes nothing.
 
 [defaults]
-# Polling interval for realtime feeds. MTA regenerates roughly every 30s;
-# polling faster just burns requests for identical payloads.
+# DECLARED, UNUSED until Phase 3. Polling interval for realtime feeds. MTA
+# regenerates roughly every 30s; polling faster just burns requests for
+# identical payloads.
 poll_interval_seconds = 30
-# A feed whose header timestamp is older than this is treated as stale and
-# raises a health event instead of silently producing old data.
+# DECLARED, UNUSED until Phase 3. A feed whose header timestamp is older than
+# this should be treated as stale and raise a health event instead of silently
+# producing old data.
 stale_after_seconds = 300
+# Live: the static-archive download timeout.
 request_timeout_seconds = 20
-# On-time threshold used by the default on-time-performance measure.
+# DECLARED, UNUSED until Phase 5. On-time threshold for the on-time-performance
+# measure, which needs realtime arrivals before it can exist.
 on_time_threshold_seconds = 300
 
 # ---------------------------------------------------------------------------
@@ -52,6 +61,8 @@ url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs"
 name = "sir"
 url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-si"
 
+# DECLARED, UNUSED until Phase 3 -- both fields describe realtime id matching,
+# and nothing reads a realtime feed yet.
 [agency.quirks]
 # NYCT realtime trip_ids carry a schedule-run prefix and do not match static
 # trip_ids literally; they must be matched on the suffix after the underscore.

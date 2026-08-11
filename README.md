@@ -275,6 +275,12 @@ rather than chosen:
    append an N/S direction suffix). Adding an agency is an entry here, not a
    code change. Both the Rust ingest and the Python cube read this file.
 
+   Every realtime setting in it — the quirks, the poll interval, the staleness
+   bound, the on-time threshold — is marked `DECLARED, UNUSED` and honoured by
+   nothing until Phase 3. They are recorded because finding them cost the time,
+   but the tests over them assert the file parses, not that any code obeys it.
+   Only `request_timeout_seconds` has a consumer today.
+
 2. **Fetch** (`transit-ingest fetch`). Downloads each static archive to
    `data/raw/<agency>.zip`, keeping one it already has — the static feeds change
    a few times a year — unless `--force`. A download is validated as a zip
