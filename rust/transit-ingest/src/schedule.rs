@@ -155,7 +155,7 @@ impl<'a> Schedule<'a> {
         let mut stats = Stats::default();
 
         for service_id in self.calendar.services_on(service_date) {
-            let Some(trips) = self.trips_by_service.get(service_id) else {
+            let Some(trips) = self.trips_by_service.get(service_id.as_str()) else {
                 // A service with dates but no trips is legal and inert. It
                 // usually means a feed retired the trips and left the calendar.
                 continue;

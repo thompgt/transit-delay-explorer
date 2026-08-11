@@ -18,7 +18,7 @@
 //! that is both added and removed on one date does not run, because a removal
 //! is the more specific statement and that is how producers use it.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use chrono::{Datelike, NaiveDate};
@@ -35,9 +35,20 @@ use crate::gtfs::time::parse_date;
 const MAX_SERVICE_SPAN_DAYS: i64 = 5 * 366;
 
 /// Every service id in a feed, expanded to the dates it actually runs.
+///
+/// Held both ways round. `dates` answers "when does this service run", which is
+/// how the calendar files are shaped; `by_date` answers "what runs on this
+/// day", which is what a per-partition build asks once per date. That second
+/// question used to be a scan of every service in the feed, paid again for each
+/// of the seven-odd dates in a window and for each of three agencies. Inverting
+/// once during expansion costs one pass over data already in memory.
 #[derive(Debug, Default)]
 pub struct ServiceCalendar {
     dates: HashMap<String, BTreeSet<NaiveDate>>,
+    /// Services per date, sorted, so `services_on` is a lookup and its output
+    /// stays deterministic — two runs over one feed must produce byte-identical
+    /// Parquet.
+    by_date: BTreeMap<NaiveDate, Vec<String>>,
 }
 
 impl ServiceCalendar {
@@ -136,7 +147,19 @@ impl ServiceCalendar {
             }
         }
 
-        let calendar = Self { dates };
+        // Inverted after every addition and removal has been applied, so a
+        // service removed from a date cannot survive in the index.
+        let mut by_date: BTreeMap<NaiveDate, Vec<String>> = BTreeMap::new();
+        for (service_id, service_dates) in &dates {
+            for date in service_dates {
+                by_date.entry(*date).or_default().push(service_id.clone());
+            }
+        }
+        for services in by_date.values_mut() {
+            services.sort_unstable();
+        }
+
+        let calendar = Self { dates, by_date };
 
         let empty = calendar.dates.values().filter(|d| d.is_empty()).count();
         if empty > 0 {
@@ -165,15 +188,18 @@ impl ServiceCalendar {
     }
 
     /// Every service running on `date`, sorted for deterministic output.
-    pub fn services_on(&self, date: NaiveDate) -> Vec<&str> {
-        let mut services: Vec<&str> = self
-            .dates
-            .iter()
-            .filter(|(_, dates)| dates.contains(&date))
-            .map(|(id, _)| id.as_str())
-            .collect();
-        services.sort_unstable();
-        services
+    ///
+    /// A lookup into the index built during expansion, not a scan: this is
+    /// called once per partition, and the Subway feed has thousands of services.
+    pub fn services_on(&self, date: NaiveDate) -> &[String] {
+        self.by_date.get(&date).map_or(&[], Vec::as_slice)
+    }
+
+    /// Distinct dates on which anything runs.
+    ///
+    /// Read straight off the inverted index, whose keys are exactly that set.
+    pub fn active_dates(&self) -> BTreeSet<NaiveDate> {
+        self.by_date.keys().copied().collect()
     }
 
     /// First and last date any service runs. `None` when nothing runs at all.
@@ -189,11 +215,6 @@ impl ServiceCalendar {
 
     pub fn service_count(&self) -> usize {
         self.dates.len()
-    }
-
-    /// Distinct dates on which anything runs.
-    pub fn active_dates(&self) -> BTreeSet<NaiveDate> {
-        self.dates.values().flatten().copied().collect()
     }
 }
 
@@ -455,6 +476,51 @@ mod tests {
         assert_eq!(calendar.services_on(date(2026, 3, 2)), ["EXTRA", "WK"]);
         assert_eq!(calendar.services_on(date(2026, 3, 7)), ["WE"]);
         assert!(calendar.services_on(date(2026, 4, 1)).is_empty());
+    }
+
+    #[test]
+    fn the_by_date_index_agrees_with_the_by_service_expansion() {
+        // services_on reads an index built during expansion rather than
+        // scanning every service. The two views can only disagree if the index
+        // is built too early -- before a removal has been applied -- so this
+        // checks them against each other over a feed that has one.
+        let calendar = ServiceCalendar::build(&feed(
+            vec![
+                weekly("WK", WEEKDAYS, "20260302", "20260306"),
+                weekly("WE", WEEKENDS, "20260302", "20260308"),
+            ],
+            vec![
+                exception("EXTRA", "20260302", 1),
+                // Added and removed on the same date: it does not run.
+                exception("GHOST", "20260303", 1),
+                exception("GHOST", "20260303", 2),
+                exception("WK", "20260304", 2),
+            ],
+        ))
+        .unwrap();
+
+        for date in calendar.active_dates() {
+            let indexed = calendar.services_on(date);
+            for service in indexed {
+                assert!(
+                    calendar.runs_on(service, date),
+                    "{service} indexed on {date} but does not run then"
+                );
+            }
+            let scanned = calendar
+                .dates
+                .iter()
+                .filter(|(_, dates)| dates.contains(&date))
+                .count();
+            assert_eq!(indexed.len(), scanned, "{date} disagrees");
+        }
+
+        assert!(!calendar
+            .services_on(date(2026, 3, 3))
+            .contains(&"GHOST".to_string()));
+        assert!(!calendar
+            .services_on(date(2026, 3, 4))
+            .contains(&"WK".to_string()));
     }
 
     #[test]

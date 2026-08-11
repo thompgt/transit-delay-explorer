@@ -49,7 +49,7 @@ parsing with `csv` + `serde` and `Option<T>` for GTFS's genuinely optional
 fields, streaming zip extraction, `chrono`/`chrono-tz` for timezone- and
 DST-correct instant resolution, `thiserror` error enums with one variant per
 failure mode, and Arrow `RecordBatch` construction written straight to
-zstd-compressed Parquet via `arrow` + `parquet` 53. 137 unit tests in-tree.
+zstd-compressed Parquet via `arrow` + `parquet` 53. 138 unit tests in-tree.
 
 **Java** — Spring Boot 3.3 on Java 21: records as the domain model, Spring Kafka
 consumers, Actuator (health/metrics/Prometheus), virtual threads enabled for the
